@@ -1,0 +1,10 @@
+{
+  "name": "webtempleos",
+  "private": true,
+  "type": "module",
+  "description": "TempleOS ported to WebAssembly",
+  "scripts": {
+    "build": "node tools/build.js",
+    "start": "node server.cjs"
+  }
+}
