@@ -1,21 +1,28 @@
-# WebTempleOS: work in progress
+PROJECT DONE (2026-10-17)
+
+# WebTempleOS: status
 
 TempleOS ported to WebAssembly without x86 emulation. **Start with
-HANDOFF.md** (where things stand, how to run them, next steps). DESIGN.md
-holds the architecture.
+HANDOFF.md** (how to run it, where things are, what could be improved).
+DESIGN.md holds the architecture.
 
 ## Done
-- Bootstrap compiler: a literal JS port of TempleOS's front-end (DolDoc
-  lexing, PrsExp/PrsVar/PrsStmt with the AOT paths, OptPass012), a host env
-  for `#exe{}`, the CmpJoin/Cmp BIN writer, and an IC interpreter for
-  compile-time evaluation.
-- IC→wasm backend: Kernel.PRJ and Compiler.PRJ compile to valid wasm
-  (assembly is still stubbed by "lenient asm").
-- Runtime loader (runtime/wasmload.js) and HolyC backend tests: 109 checks
-  pass (`MSYS_NO_PATHCONV=1 node test/run.mjs`).
+- `node server.cjs`: a browser tab boots TempleOS to its normal desktop
+  (Adam, the window manager, user terminals; 640x480 16 colors).
+- Keyboard (PS/2 scan codes) and mouse (PS/2, pointer lock) work.
+- HolyC typed at the command line is JIT-compiled and run by the real
+  TempleOS Compiler: Compiler.BIN as wasm, its COCCompile feeding the
+  wasm back-end (runtime/jit.js).
+- Files on C: survive a reload: the RedSea disk image's written sectors
+  are kept in IndexedDB.
+- `node test/boot.mjs` reaches the same desktop headless.
+- Tests: `node test/run.mjs`, `node test/jit.mjs [-adam]`,
+  `node test/browser.mjs` (Playwright Chromium).
 
-## Next
-1. Port the kernel's asm to `port/` (builtins plus a data-only asm subset).
-2. Boot the kernel in Node.
-3. Device emulation, tasks with JSPI.
-4. Runtime JIT through the real Compiler, then the browser UI.
+## Pieces
+- Bootstrap compiler: a literal JS port of TempleOS's front-end; it builds
+  Kernel.BIN and Compiler.BIN (TempleOS BINs carrying wasm).
+- IC->wasm back-end shared by the bootstrap (AOT) and the run-time JIT.
+- Kernel and Adam asm ported to HolyC in `port/`, at the same spots.
+- Devices in JS: PIC, PIT, CMOS, ATA disk, 8042 keyboard/mouse, VGA.
+- Tasks run on their own JSPI stacks.

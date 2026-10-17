@@ -1,6 +1,6 @@
 // Build: AOT compile the Kernel (and the Compiler) with the bootstrap
 // compiler into TempleOS BINs carrying their wasm modules.
-//   node tools/build.js [Kernel] [Compiler]     (default: both)
+//   node tools/build.js [Kernel] [Compiler]     (default: both; then node tools/mkdisk.js)
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -39,7 +39,7 @@ export function mapFile(h) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const targets = which.length ? which : ['Kernel'];
+  const targets = which.length ? which : ['Kernel', 'Compiler'];
   fs.mkdirSync(out, { recursive: true });
   for (const t of targets) {
     const t0 = Date.now();

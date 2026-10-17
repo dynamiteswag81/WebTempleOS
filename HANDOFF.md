@@ -1,20 +1,32 @@
 # WebTempleOS — handoff (2026-10-17)
 
+**The project's definition of done is met** (see STATUS.md): a browser
+tab served by `node server.cjs` boots TempleOS to its desktop, keyboard and
+mouse work, HolyC at the command line is JIT-compiled by the real Compiler,
+and C: survives a reload (IndexedDB).  `node test/boot.mjs` does the same
+headless.  What follows is how to run it and what could be improved.
+
 Goal: a faithful port of TempleOS to WebAssembly. No x86 emulation, no
 networking. TempleOS's own compiler front-end produces intermediate code (ICs),
 and a shared IC→wasm backend replaces its x86 back-end. Read **DESIGN.md**
 first; it holds the architecture and the reasons behind it. This file says
 where things stand and what to do next.
 
-## State (2026-10-17, session 4, ~11:15 UTC)
+## State (2026-10-17, session 4, ~11:30 UTC)
 Setup on a fresh machine: `sh tools/fetch-vendor.sh`, Node 24+ (if the
 machine has an older node first on PATH, put Node 24's bin dir first).
 
-**Boot in Node reaches the normal TempleOS desktop** (VGA 640x480x16):
-`node tools/build.js Kernel && node tools/build.js Compiler && node tools/mkdisk.js && node test/boot.mjs -secs=30`
-writes `build/screen.png`: WinMgr, two user terminals, Tip of the Day,
-"Take Tour(y or n)?".  The real Compiler (Compiler.BIN as wasm) JIT-compiles
-StartOS/Adam through runtime/jit.js.
+**Run it:** `npm run build` (= `node tools/build.js Kernel Compiler &&
+node tools/mkdisk.js`: build/Kernel.BIN, Compiler.BIN, *.MAP, layout.json,
+C.img), then `node server.cjs` and open http://localhost:8090/ in a
+browser with JSPI (Chrome/Chromium 137+).  Click the screen to capture the
+mouse (Esc releases it).  "Reset C:" forgets the files saved in the browser.
+
+Headless: `node test/boot.mjs -secs=12` writes `build/screen.png`.  The
+desktop is up about 6 s after start in Node (the real Compiler JIT-compiles
+StartOS/Adam: ~3500 units).  `node test/browser.mjs` does the same in
+Playwright's Chromium (build/browser.png); `-reload -type=... -type2=...`
+checks that files survive a reload.
 
 What session 4 added (see git log for details):
 - Boot fixes: `sys_ctrl_alt_flags` is an array (Sched.HC tested its addr);
@@ -145,40 +157,23 @@ Design decisions to keep:
 - **Gotcha**: a lone `$` in a port file comment starts a DolDoc command and
   silently eats the rest of the file. Write `$$`.
 
-## Boot plan (next session)
-1. `port/Kernel/KMain.HC`: copy the original and add `U0 KStartWasm()` after
-   KMain. It does what KStart32/64 did: `*INT_MP_CRASH_ADDR(U32 *)=&IntMPCrash;`
-   SysInitPageTables; SysInit16MegSysCodeBp; RLf_64BIT;
-   `SetGsBase(CPUStructInit(0,&fixed->boot_cpu,&fixed->adam))`; init
-   fixed->adam_hc as KStart64 did; `SetFsBase(TaskInit(adam,MEM_ADAM_STK))`.
-   Then give JS the CTask rip/rsp/rbp/rflags offsets (add a js builtin), call
-   `CtxSwitch(Fs)` once so the boot stack becomes Adam's, `SetRSP(Fs->rsp)`
-   and call KMain.
-2. `runtime/boot.js` + `runtime/sched.js`: create a Machine with 65536 pages
-   and the js builtins (Suspending where needed). Copy the BIN *without* the
-   wasm bytes to 0x7C00 (base 0x7C20; the wasm is too big for low memory).
-   Patch abs addrs and instantiate. Fill the KStart16 vars through the
-   exports: MEM_BOOT_BASE=base, SYS_BOOT_PATCH_TABLE_BASE=0x7C00+patch_off,
-   E801/E820, MEM_PHYSICAL_SPACE, SYS_RUN_LEVEL (16BIT|32BIT|PATCHED, no VGA
-   at first, so text mode at 0xB8000 is easy to dump), SYS_PCI_BUSES. Set
-   sp below 0x97000 and call KStartWasm through `WebAssembly.promising`.
-3. Minimal devices: PIT (0x40/0x43, IRQ0 at 1 kHz), PIC (0x20/0x21 mask,
-   ICW2 base, EOI), CMOS RTC, keyboard status 0. `_HLT_WAIT` awaits the next
-   tick and throws if IF is off.
-
-## How to run things (Git Bash, from the repo root)
-Git Bash rewrites `/Kernel/...` arguments into Windows paths, so prefix
-commands with `MSYS_NO_PATHCONV=1`.
+## How to run things (from the repo root)
+On Windows Git Bash prefix with `MSYS_NO_PATHCONV=1` (it rewrites `/Kernel/...`).
 ```bash
-MSYS_NO_PATHCONV=1 node test/run.mjs                    # backend unit tests (test/hc/*.HC)
-MSYS_NO_PATHCONV=1 node test/cmpkernel.mjs              # Kernel -> build/Kernel.wasm (lenient asm)
-MSYS_NO_PATHCONV=1 node test/cmpkernel.mjs /Compiler/Compiler
-MSYS_NO_PATHCONV=1 node test/cmpkernel.mjs -strict      # fails at the first asm block (this is the port to-do list)
-MSYS_NO_PATHCONV=1 HCC_DUMP=QueCnt,Fib node test/cmpkernel.mjs   # print the post-OptPass012 ICs of those functions
-HCC_TRACE=20000 ...                                      # lexer progress trace, written to stderr
+npm run build                      # Kernel.BIN, Compiler.BIN, MAPs, layout.json, C.img
+node server.cjs [port]             # http://localhost:8090/
+node test/run.mjs                  # backend unit tests (AOT, test/hc/*.HC)
+node test/jit.mjs [-adam] [-v]     # the same tests through the real Compiler at run time
+node test/boot.mjs -secs=12 [-type='n"%d\n",1+1;\n' -typeat=8] [-mouse=dx,dy,buttons] [-text]
+node test/browser.mjs -secs=40 [-reload -type=... -type2=...] [-mouse=x,y]
+node tools/build.js Kernel -trace  # then boot.mjs -trace -until=Fn -skip=A,B -args=Fn
+node tools/rsls.js build/C.img /Home
+node tools/binfix.js FILES...      # check/repair DolDoc bins
+HCC_DUMP=Fn node tools/build.js Kernel     # ICs of Fn (bootstrap compiler)
+JIT_DUMP=IC_NAME node test/jit.mjs         # ICs of run-time units containing IC_NAME
 ```
-`vendor/TempleOS/` (gitignored) is the TempleOS source tree; drive `C:` maps to
-it, with `port/` overlaid on top (`TempleFS` in aot.js).
+`vendor/TempleOS/` (gitignored, `sh tools/fetch-vendor.sh`) is the TempleOS
+source tree; drive `C:` maps to it with `port/` overlaid on top.
 
 ## File map
 | File | What it is |
@@ -195,7 +190,18 @@ it, with `port/` overlaid on top (`TempleFS` in aot.js).
 | `compiler/backend.js` | IC→wasm (`Unit`) and `AOTBackend` (module building, blobs and descriptors, builtins, `__init`). |
 | `runtime/wasmload.js` | `Machine`: memory, table, CPU globals, resume tag; `loadBin()`, `call()`. Used by the tests; meant to become the browser runtime. |
 | `port/Kernel/KCfg.HC` | Non-interactive kernel config (single core, IDE auto-mount on C:). |
-| `test/hc/*.HC` | Backend tests. Expected output goes on `//> ` lines. |
+| `test/hc/*.HC` | Backend tests. Expected output goes on `//> ` lines. Also run through the real Compiler by test/jit.mjs. |
+| `test/hca/*.HC` | Tests run after MakeAdam (`test/jit.mjs -adam`). |
+| `runtime/pc.js` | `PC`: machine + devices + boot loader + the builtins' JS services. |
+| `runtime/sched.js` | JSPI task switching. |
+| `runtime/jit.js` | Run-time back-end: ICs in linear memory -> one wasm function per unit. |
+| `runtime/devices.js`, `ata.js`, `ps2.js`, `vga.js` | PIC/PIT/CMOS, ATA disk, 8042 kbd+mouse, VGA. |
+| `runtime/diskstore.js` | IndexedDB overlay of the C: image (browser). |
+| `web/` | Page (`index.html`, `main.js`) and the worker running `PC`. |
+| `server.cjs` | Static server with COOP/COEP (shared memory needs isolation). |
+| `tools/build.js` | Builds Kernel/Compiler BINs (+ MAP, layout.json). |
+| `tools/mkdisk.js`, `binfix.js`, `rsls.js` | C: image builder, DolDoc bin repair, image lister. |
+| `port/Compiler/`, `port/Adam/` | Compiler without the x86 back-end; Adam's asm in HolyC. |
 
 ## Key design facts (details in DESIGN.md)
 - **Code address = 8-byte descriptor** `[u32 table index][u32 'WASM']`. A
@@ -237,14 +243,17 @@ it, with `port/` overlaid on top (`TempleFS` in aot.js).
   them and save/restore RFLAGS (IRET).
 - The bootstrap must strip lexer strings' trailing NUL (`cstr()` in aot.js).
 
-## Next steps, in order
-1. Keyboard/mouse at the desktop: type at the prompt (`-type=`), answer
-   the Tour question, run HolyC at the command line, check the output.
-2. Browser UI: `server.cjs` (static files + COOP/COEP for
-   SharedArrayBuffer), `web/index.html` + a worker running `PC`
-   (canvas 640x480 from `vga.render`, key/mouse events -> `pc.key`/
-   `pc.mouse`), disk image fetched from build/C.img and kept in
-   IndexedDB (dirty sectors written back via the ATA `onWrite` hook).
-3. Performance: boot takes ~20 s of JIT; dominator-based structuring,
-   wasm locals for non-address-taken locals, batching JIT units.
-4. The 4 docs binfix can't repair; .DATA files.
+## Next steps (after done: improvements)
+1. Performance of generated code: dominator-based structuring in place of
+   the dispatch loop, wasm locals for non-address-taken locals, fewer i64
+   shadow-stack round trips.  JIT: batch units, share helper functions
+   instead of emitting them in every module (each JIT module carries
+   addHelpers' functions).
+2. The 4 docs tools/binfix.js can't repair (RawHide.HC, Titanium.HC, ...),
+   and .DATA files (AutoComplete dictionaries) damaged by `TOSZ -ascii`.
+3. Sound (PIT channel 2 / port 0x61 -> WebAudio; `pit.speaker` hook exists).
+4. The debugger can't single-step and there are no code breakpoints; a
+   compile error in echo-on mode once showed an odd "INT:13" message while
+   compiling GrBitMap.HC (test/jit.mjs without Option(0,0)): worth a look.
+5. Run-time AOT (`Cmp()` of a .PRJ inside TempleOS) is refused by the JIT
+   back-end; BootHDIns and the like can't rebuild the kernel.

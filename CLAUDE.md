@@ -14,9 +14,12 @@ hands over to the next.
 
 ## Commands
 ```bash
+npm run build                  # build/Kernel.BIN, Compiler.BIN, *.MAP, layout.json, C.img
+node server.cjs                # http://localhost:8090/ (browser with JSPI)
 node test/run.mjs              # backend unit tests (test/hc/*.HC)
-node tools/build.js Kernel     # build/Kernel.BIN (strict: every asm block ported)
-node test/boot.mjs -secs=10    # boot the kernel in Node, print the text screen
+node test/jit.mjs [-adam]      # the same tests compiled at run time by the real Compiler
+node test/boot.mjs -secs=12    # boot in Node, save build/screen.png
+node test/browser.mjs          # boot in Playwright's Chromium, save build/browser.png
 node test/cmpkernel.mjs -strict
 ```
 On Windows Git Bash, prefix these with `MSYS_NO_PATHCONV=1` (it rewrites

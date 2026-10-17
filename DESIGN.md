@@ -84,3 +84,33 @@ matching TempleOS's CCF_NO_REG_OPT).
 ## Tasks
 JSPI: each TempleOS task is a suspendable wasm stack; Yield switches by
 suspending to a JS scheduler.
+
+## Run time (as built)
+* **Boot**: `runtime/pc.js` loads Kernel.BIN at 0x7C00 (header, image and
+  patch table; the wasm is instantiated from the file), fills KStart16's
+  variables (E820 with a reserved entry up to 4 GB, run level) and calls
+  `KStartWasm()` (port/Kernel/KMain.HC) on a JSPI stack.
+* **Load()** (port/Kernel/KLoad.HC) calls `WasmLoad()` before LoadPass1: the
+  module's `__init` turns its descriptors' slot numbers into table indices.
+* **JIT**: port/Compiler/PrsLib.HC `COCCompile` runs OptPass012 twice, then
+  `JITCompile(cc,_type)` (runtime/jit.js reads the CIntermediateCode list
+  and CCodeMisc labels from linear memory, offsets from build/layout.json,
+  and returns the blob size) and `JITStore(cc,res)` (builds a one-function
+  module, instantiates it, appends it to the table, writes the descriptor
+  and string constants at res).  Calls to known code use the callee's
+  table index as a constant; externs not yet defined go through
+  `&exe_addr` at run time (IC_CALL_INDIRECT2).
+* **IRQs**: taken at STI/POPFD, PAUSE and HLT (`_IrqPoll`).  `_IntDeliver`
+  counts the handler depth per stack: `_TaskContextRestore` only restores
+  RFLAGS (POPFD) outside handlers; inside, the handler's own return does
+  (IRET), so timer IRQs don't nest.
+* **Breathing**: `IrqPending()` and port input are JSPI imports that return
+  a promise about every 10 ms, so polling code lets the event loop run.
+* **Devices** (runtime/): PIC/PIT/CMOS/misc (devices.js), ATA PIO disk on
+  0x1F0 (ata.js), 8042 with a set-1 keyboard and a wheel mouse (ps2.js),
+  VGA registers and DAC (vga.js).  VGA memory can't be memory-mapped, so
+  port/Adam/Gr/GrScrn.HC writes plane p at 0xA0000+p*0x10000 and the
+  renderer reads the four planes.
+* **C:** is a RedSea image built by tools/mkdisk.js (MBR, partition at
+  sector 63).  In the browser, written sectors go to IndexedDB in 64K
+  chunks over the fetched image (runtime/diskstore.js).

@@ -4,7 +4,8 @@
   "type": "module",
   "description": "TempleOS ported to WebAssembly",
   "scripts": {
-    "build": "node tools/build.js",
+    "build": "node tools/build.js Kernel Compiler && node tools/mkdisk.js",
+    "test": "node test/run.mjs && node test/jit.mjs",
     "start": "node server.cjs"
   }
 }
