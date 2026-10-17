@@ -9,6 +9,7 @@ import { IOBus, PICs, PIT, CMOS, Misc } from './devices.js';
 import { ATADisk } from './ata.js';
 import { PS2, charScan } from './ps2.js';
 import { JIT } from './jit.js';
+import { VGA } from './vga.js';
 
 export const MEM_PAGES = 65536; // 4 GB: the uncached alias wraps to 0 (HANDOFF.md)
 const GB = 0x100000000;
@@ -51,6 +52,7 @@ export class PC {
     this.pit = new PIT(io, this.pics, now);
     this.cmos = new CMOS(io);
     this.misc = new Misc(io, this.pit);
+    this.vgaDev = new VGA(io);
     this.ps2 = new PS2(io, this.pics);
     this.ps2.onIrq = () => this.wakeHlt();
     if (disk) this.ata = new ATADisk(io, disk, { onWrite: onDiskWrite });

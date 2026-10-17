@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { PC } from '../runtime/pc.js';
+import { png } from './png.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (n, d) => { const a = process.argv.find((x) => x.startsWith(`-${n}=`)); return a ? a.slice(n.length + 2) : d; };
@@ -36,7 +37,7 @@ const imgPath = path.join(root, 'build', 'C.img');
 const disk = fs.existsSync(imgPath) ? new Uint8Array(fs.readFileSync(imgPath)) : null;
 if (!disk) console.log('(no build/C.img: run node tools/mkdisk.js)');
 const layout = JSON.parse(fs.readFileSync(path.join(root, 'build', 'layout.json'), 'utf8'));
-const pc = new PC({ ramMB: +arg('ram', 1024), trace, disk, layout });
+const pc = new PC({ ramMB: +arg('ram', 1024), trace, disk, layout, vga: !process.argv.includes('-text') });
 let done;
 const finished = new Promise((r) => { done = r; });
 pc.onHalt = (e) => done(e);
@@ -46,7 +47,13 @@ const timer = setTimeout(() => done(null), secs * 1000);
 const e = await finished;
 clearTimeout(timer);
 console.log(`--- ${((performance.now() - t0) / 1000).toFixed(2)} s, ${pc.sched.switches} task switches`);
-console.log(pc.textScreen());
+if (pc.vga) {
+  const rgba = new Uint32Array(640 * 480);
+  pc.vgaDev.render(pc.u8, rgba);
+  const out = arg('png', path.join(root, 'build', 'screen.png'));
+  fs.writeFileSync(out, png(640, 480, new Uint8Array(rgba.buffer)));
+  console.log('screen: ' + out);
+} else console.log(pc.textScreen());
 if (names) {
   console.log('--- last calls (fn sp):');
   for (const [id, sp] of ring) console.log(names[id] + ' ' + sp.toString(16));
