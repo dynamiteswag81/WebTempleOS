@@ -1,5 +1,10 @@
 # WebTempleOS — handoff (2026-10-17)
 
+**Could not start the next project (WebLinux):** firing the scheduled task
+trig_01JUHvBA2uNbQJVWrVu46kjG was refused ("created via http_api, not by an
+agent; agents can only fire routines they created").  Start it yourself at
+https://claude.ai/code/routines/trig_01JUHvBA2uNbQJVWrVu46kjG.
+
 **The project's definition of done is met** (see STATUS.md): a browser
 tab served by `node server.cjs` boots TempleOS to its desktop, keyboard and
 mouse work, HolyC at the command line is JIT-compiled by the real Compiler,
