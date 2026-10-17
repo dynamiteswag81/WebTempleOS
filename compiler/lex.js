@@ -4,6 +4,7 @@
 import * as K from './consts.js';
 import { CompileError, HashFind, CHashDefineStr, CMemberLst, MemberFind } from './core.js';
 import { I64, U64, b2f, f2b } from './util.js';
+import { docParse, dollarRender, DE_TEXT, DE_NEW_LINE, DE_TAB } from './doldoc.js';
 
 export const isAlnum = (c, cc) => {
   if (c >= 128) return c < 256;
@@ -25,6 +26,7 @@ export class CLexFile {
   constructor() {
     this.next = null; this.buf = ''; this.buf_ptr = 0; this.line_num = 1; this.flags = 0;
     this.full_name = ''; this.line_start = 0; this.depth = -1; this.last_U16 = 0;
+    this.doc = null; this.cur_entry = -1;
   }
   clone() { const c = new CLexFile(); Object.assign(c, this); return c; }
 }
@@ -34,7 +36,7 @@ export class CCmpCtrl {
     this.env = env; this.cmp = env.cmp;
     this.token = 0; this.flags = BigInt(flags || 0); this.cur_i64 = 0n; this.cur_f64 = 0;
     this.cur_str = null; this.cur_str_len = 0; this.class_dol_offset = 0;
-    this.dollar_cnt = 0; this.cur_help_idx = '';
+    this.dollar_cnt = 0; this.dollar_buf = ''; this.cur_help_idx = '';
     this.last_U16 = 0; this.min_line = 0; this.max_line = 0; this.last_line_num = 0; this.lock_cnt = 0;
     this.htc = { next: null, old_flags: 0n, hash_mask: K.HTG_TYPE_MASK - K.HTT_IMPORT_SYS_SYM,
       local_var_lst: null, fun: null, hash_table_lst: env.hash_table, define_hash_table: env.hash_table,
@@ -68,8 +70,13 @@ export function LexFilePop(cc) {
 }
 
 export function LexExcept(cc, str = '') {
-  const f = cc.lex_include_stk;
-  const where = f ? `${f.full_name}:${f.line_num}` : '';
+  let where = '';
+  for (let f = cc.lex_include_stk; f; f = f.next) {
+    if (where) where += ' <- ';
+    where += `${f.full_name}:${f.line_num}`;
+    if (f.flags & K.LFSF_DEFINE) where += ` [define ${JSON.stringify(f.buf.slice(0, 60))}]`;
+  }
+  where += ` (token ${cc.token}${cc.cur_str ? ' ' + JSON.stringify(String(cc.cur_str).slice(0, 40)) : ''})`;
   cc.error_cnt++;
   throw new CompileError((str || 'Compiler error').trim(), where);
 }
@@ -79,41 +86,109 @@ export function LexWarn(cc, str = '') {
   if (cc.env.warn) cc.env.warn(`${(str || 'Warning').trim()} ${f ? f.full_name + ':' + f.line_num : ''}`);
 }
 
+// LexDollar(): a doc cmd inside a string literal is lexed as its "$..$" text.
+function LexDollar(cc, e) {
+  if (cc.flags & K.CCF_IN_QUOTES) {
+    cc.dollar_buf = dollarRender(e.cmd || '');
+    cc.dollar_cnt = 2;
+    return true;
+  }
+  return false;
+}
+
 export function LexGetChar(cc) {
   if (cc.flags & K.CCF_USE_LAST_U16) {
     cc.flags &= ~K.CCF_USE_LAST_U16;
     return cc.last_U16;
   }
-  for (;;) {
-    const f = cc.lex_include_stk;
-    let ch = cc.cur_buf_ptr < f.buf.length ? f.buf.charCodeAt(cc.cur_buf_ptr) : 0;
-    cc.cur_buf_ptr++;
+  lgc_start1: for (;;) {
+    let f = cc.lex_include_stk;
+    if (LEX_TRACE && ++lexCnt % (LEX_TRACE * 10) === 0)
+      process.stderr.write(`[getc ${lexCnt}] ${f.full_name}:${f.line_num} doc=${!!(f.flags & K.LFSF_DOC)} ent=${f.cur_entry} p=${cc.cur_buf_ptr}/${f.buf.length}
+`);
+    const p = cc.cur_buf_ptr++;
+    const ch = p < f.buf.length ? f.buf.charCodeAt(p) : 0;
+    cc.last_U16 = ch;
     if (ch === 0) {
+      // lgc_here:
+      if (f.flags & K.LFSF_DOC) {
+        const doc = f.doc;
+        let i = f.cur_entry + 1;
+        for (; i < doc.length; i++) {
+          const e = doc[i];
+          f.cur_entry = i;
+          if (e.type === DE_TEXT) {
+            if (e.tag.length) { f.buf = e.tag; f.buf_ptr = cc.cur_buf_ptr = 0; break; }
+          } else if (e.type === DE_NEW_LINE) {
+            f.buf = ''; f.buf_ptr = cc.cur_buf_ptr = 0;
+            f.line_start = i + 1;
+            f.line_num = e.y + 2;
+            cc.cmp.compiled_lines++;
+            cc.last_U16 = 10;
+            return 10;
+          } else if (e.type === DE_TAB) {
+            f.buf = ''; f.buf_ptr = cc.cur_buf_ptr = 0;
+            f.line_num = e.y + 1;
+            cc.last_U16 = 9;
+            return 9;
+          } else if (LexDollar(cc, e) && cc.dollar_buf.length) {
+            f.line_num = e.y + 1;
+            f.buf = cc.dollar_buf; f.buf_ptr = cc.cur_buf_ptr = 0;
+            break;
+          }
+        }
+        if (i < doc.length) continue lgc_start1;
+        f.cur_entry = doc.length - 1; // When take next, will still be end.
+      }
+      f = cc.lex_include_stk;
       if (f.next) {
         const t = LexFilePop(cc);
         cc.cur_buf_ptr = t.buf_ptr;
         cc.flags &= ~K.CCF_USE_LAST_U16;
-        if (!(cc.last_U16 = t.last_U16)) continue;
-        ch = cc.last_U16;
+        if (!(cc.last_U16 = t.last_U16)) continue lgc_start1;
       } else {
-        cc.cur_buf_ptr--;
         if (cc.flags & K.CCF_PMT && cc.env.prompt) {
           const s = cc.env.prompt(cc);
-          if (s) { f.buf = s; cc.cur_buf_ptr = 0; continue; }
+          if (s) { f.buf = s; f.buf_ptr = f.line_start = cc.cur_buf_ptr = 0; continue lgc_start1; }
         }
-        ch = 0;
+        cc.cur_buf_ptr = p;
+        cc.last_U16 = K.TK_EOF;
       }
     } else if (ch === CH_CURSOR) {
-      continue;
+      continue lgc_start1;
     } else if (ch === 10) {
-      f.line_num++;
-      cc.cmp.compiled_lines++;
-      f.line_start = cc.cur_buf_ptr;
+      if (!(f.flags & K.LFSF_DOC)) {
+        f.line_num++;
+        cc.cmp.compiled_lines++;
+        f.line_start = cc.cur_buf_ptr;
+      }
     }
-    if (ch === CH_SHIFT_SPACE) ch = 32;
-    cc.last_U16 = ch;
-    return ch;
+    break;
   }
+  if (cc.last_U16 === CH_SHIFT_SPACE) cc.last_U16 = 32;
+  return cc.last_U16;
+}
+
+// LexAttachDoc(): start lexing a DolDoc source file.
+export function LexAttachDoc(cc, abs_filename, src) {
+  const doc = docParse(src);
+  LexBackupLastChar(cc);
+  const f = LexFilePush(cc);
+  f.full_name = abs_filename;
+  f.doc = doc;
+  let i = 0;
+  while (i < doc.length && doc[i].type !== DE_TEXT && doc[i].type !== DE_TAB) i++;
+  if (i < doc.length) {
+    f.line_start = i;
+    f.line_num = doc[i].y + 1;
+    if (doc[i].type === DE_TEXT) { f.cur_entry = i; f.buf = doc[i].tag; }
+    else { f.cur_entry = i - 1; f.buf = ''; }
+    f.flags = K.LFSF_DOC;
+  } else {
+    f.buf = ''; f.line_start = 0; f.line_num = 1; f.flags = 0;
+  }
+  f.buf_ptr = cc.cur_buf_ptr = 0;
+  f.last_U16 = 0;
 }
 
 export function LexSkipEol(cc) {
@@ -154,7 +229,7 @@ export function LexPopRestore(cc) {
   else cc.flags &= ~K.CCF_USE_LAST_U16;
   const f = cc.lex_include_stk;
   // MemCpy everything but ->next
-  for (const k of ['buf', 'buf_ptr', 'line_num', 'flags', 'full_name', 'line_start', 'depth', 'last_U16'])
+  for (const k of ['buf', 'buf_ptr', 'line_num', 'flags', 'full_name', 'line_start', 'depth', 'last_U16', 'doc', 'cur_entry'])
     f[k] = t[k];
   cc.lex_prs_stk = t.nextPrs;
 }
@@ -254,8 +329,13 @@ function skipIfBlock(cc, j, stopAtElse) {
   return true;
 }
 
+const LEX_TRACE = typeof process !== 'undefined' && process.env && process.env.HCC_TRACE ? Number(process.env.HCC_TRACE) : 0;
+let lexCnt = 0;
 export function Lex(cc) {
   cc.last_line_num = cc.lex_include_stk.line_num;
+  if (LEX_TRACE && ++lexCnt % LEX_TRACE === 0)
+    process.stderr.write(`[lex ${lexCnt}] ${cc.lex_include_stk.full_name}:${cc.lex_include_stk.line_num} tok=${cc.token} ${cc.cur_str}
+`);
   let ch, i, j, k;
   lexloop: for (;;) {
     ch = LexGetChar(cc);
@@ -382,7 +462,8 @@ export function Lex(cc) {
           case K.KW_INCLUDE: {
             if (Lex(cc) !== K.TK_STR) break lexloop;
             const r = cc.env.includeFile(cc, cc.cur_str);
-            LexIncludeStr(cc, r.name, r.text, true);
+            if (r.raw) LexIncludeStr(cc, r.name, r.text, true);
+            else LexAttachDoc(cc, r.name, r.text);
             continue lexloop;
           }
           case K.KW_DEFINE: {
@@ -618,6 +699,9 @@ function lexIf(cc) {
         case K.TK_IF: continue;
         case K.TK_IFDEF: return lexIfdef(cc, true, true);
         case K.TK_IFNDEF: return lexIfdef(cc, false, true);
+        case K.TK_IFAOT: // (#ifjit also lexes as TK_IFAOT inside #if, as in the original)
+          if (cc.flags & K.CCF_AOT_COMPILE || cc.env.aotMode) return 'cont';
+          return skipIfBlock(cc, 1, true) ? 'cont' : 'end';
         case K.TK_ELSE: return skipIfBlock(cc, 1, false) ? 'cont' : 'end';
         case K.TK_ENDIF: return 'cont';
         default: return 'end';

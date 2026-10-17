@@ -362,6 +362,7 @@ function newLabel(cc) {
 
 function OptFixSizeOf(cc, tmpi1, tmpi_push, tmpcc) {
   if (tmpi1.code === K.IC_MUL && tmpi1.t.arg2_tree.code === K.IC_SIZEOF) {
+    if (typeof tmpcc === 'function') tmpcc = tmpcc();
     tmpi1.t.arg2_tree.code = K.IC_IMM_I64;
     tmpi1.t.arg2_tree.cls = tmpcc;
     tmpi_push.cls = tmpcc;
@@ -577,7 +578,6 @@ export function OptPass012(cc) {
           } else if (v !== 0n && isPow2(v)) {
             tmpi.flags |= tmpi1.flags;
             tmpi.t.arg1_class = tmpi.t.arg2_class;
-            tmpi.t.arg1_tree = tmpi.t.arg2_tree;
             tmpi.data = BigInt(bsf(v));
             tmpi.code = K.IC_SHL_CONST;
             OptSetNOP1(tmpi1);
@@ -827,7 +827,7 @@ export function OptPass012(cc) {
     uo.v = groupEnd ? uo.v : uo.v;
     if (ent.arg_cnt === K.IS_2_ARG && tmpi1 && tmpi2) {
       if (((tmpi_push.prec & ~K.ASSOC_MASK) === K.PREC_ASSIGN))
-        OptFixSizeOf(cc, tmpi2, tmpi_push, csub(tmpi1.cls));
+        OptFixSizeOf(cc, tmpi2, tmpi_push, () => csub(tmpi1.cls));
       else {
         OptFixSizeOf(cc, tmpi1, tmpi_push, tmpi2.cls);
         OptFixSizeOf(cc, tmpi2, tmpi_push, tmpi1.cls);

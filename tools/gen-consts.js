@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(here, '..', 'vendor', 'TempleOS');
 const files = ['Kernel/KernelA.HH', 'Compiler/CompilerA.HH'];
-const prefixes = /^(IC_|TK_|RT_|RTF_|RTG_|HTT_|HTt_|HTF_|HTf_|HTG_|ICF_|ICf_|ICG_|CCF_|CCf_|MLF_|MLMF_|GVF_|Ff_|Cf_|KW_|AKW_|PREC_|ASSOC|PRS0|PRS1|PRSF_|FSF_|FSG_|CMT_|CMF_|CM_|OPTf_|OPTF_|MDF_|MDf_|MDG_|IS_|IST_|ECF_|CMPF_|IET_|IEF_|LFSF_|PTR_STARS_NUM|STR_LEN|IC_BODY_SIZE|DOCT_|REGT_|REG_|I8_MIN|CMP_TEMPLATE)/;
+const prefixes = /^(IC_|TK_|RT_|RTF_|RTG_|HTT_|HTt_|HTF_|HTf_|HTG_|ICF_|ICf_|ICG_|CCF_|CCf_|MLF_|MLMF_|GVF_|Ff_|Cf_|KW_|AKW_|PREC_|ASSOC|PRS0|PRS1|PRSF_|FSF_|FSG_|CMT_|CMF_|CM_|OPTf_|OPTF_|MDF_|MDf_|MDG_|IS_|IST_|ECF_|CMPF_|IET_|IEF_|LFSF_|PTR_STARS_NUM|STR_LEN|IC_BODY_SIZE|DOCT_|REGT_|REG_|I8_MIN|CMP_TEMPLATE|AAT_|REGG_|BIN_SIGNATURE|IEF_|SYS_|MEM_|BOOT_|TASK_|HEAP_|RLF_|RLf_|CTRL_|SC_|CH_)/;
 
 const out = new Map();
 function evalExpr(e) {
