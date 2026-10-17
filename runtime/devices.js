@@ -87,7 +87,7 @@ export class PIT {
     this.pics = pics; this.now = now;
     this.ch = [0, 1, 2].map(() => ({ reload: 0x10000, mode: 0, access: 3, lohi: 0, latch: null, wlo: null, t0: now() }));
     this.nextTick = Infinity;
-    this.speaker = null; // (hz|0) callback
+    this.speaker = null; // called when channel 2 changes (PC turns it into a tone)
     bus.on([0x40, 0x41, 0x42], (p) => this.read(p - 0x40), (p, v) => this.write(p - 0x40, v));
     bus.on([0x43], null, (p, v) => this.cmd(v));
   }
@@ -114,7 +114,7 @@ export class PIT {
     c.reload = v & 0xFFFF;
     c.t0 = this.now();
     if (n === 0) this.nextTick = c.t0 + this.periodMs(c);
-    if (n === 2 && this.speaker) this.speaker(this.speakerHz());
+    if (n === 2 && this.speaker) this.speaker();
   }
   read(n) {
     const c = this.ch[n];
@@ -173,7 +173,7 @@ export class Misc {
     bus.on([0x80], () => 0xFF, () => {});
     bus.on([0x61], () => (this.p61 & 0x0F) | ((performance.now() * 66) & 1 ? 0x10 : 0), (p, v) => {
       this.p61 = v;
-      if (pit.speaker) pit.speaker((v & 3) === 3 ? pit.speakerHz() : 0);
+      if (pit.speaker) pit.speaker();
     });
     bus.on([0x92], () => this.p92, (p, v) => { this.p92 = v; if (v & 1 && this.onReset) this.onReset(); });
     // PCI config: no devices

@@ -33,6 +33,8 @@ U0 _IntFault(I64 num)
   _RestoreTask(Fs); //RESTORE_FS_TASK
 }
 
+_extern _SET_RFLAGS_RAW U0 SetRFlagsRaw(I64 f); //Port: no IRQ poll.
+
 U0 _IntDeliver(I64 vec)
 {//The CPU part of an interrupt: IF off, call the gate, IRET.
   U8 *fp=IntEntryGet(vec);
@@ -46,7 +48,8 @@ U0 _IntDeliver(I64 vec)
     Call(fp);
   port_irq_depth--;
   port_irq_rflags=old_irq_rflags;
-  SetRFlags(rflags);
+  SetRFlagsRaw(rflags); //IRET.  No IRQ poll here: IRQs due back to back
+//would nest without end.  The _IrqPoll() loop takes the next one.
 }
 
 U0 _IntDivZero()

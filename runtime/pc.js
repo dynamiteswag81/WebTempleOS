@@ -4,7 +4,7 @@
 import { Machine, binInfo, HDR } from './wasmload.js';
 import { BUILTINS } from './builtins.js';
 import { BUILTIN_BASE } from '../compiler/backend.js';
-import { Sched, Halt } from './sched.js';
+import { Sched, Halt, soon } from './sched.js';
 import { IOBus, PICs, PIT, CMOS, Misc } from './devices.js';
 import { ATADisk } from './ata.js';
 import { PS2, charScan } from './ps2.js';
@@ -36,7 +36,7 @@ export class PC {
       in: new WebAssembly.Suspending((port, size) => {
         const v = BigInt(this.io.in(port, size) >>> 0);
         if (!this.sched.breathe()) return v;
-        return new Promise((res) => setTimeout(() => res(v), 0));
+        return new Promise((res) => soon(() => res(v)));
       }),
       out: (port, val, size) => this.io.out(port, Number(BigInt.asUintN(32, val)), size),
       rdtsc: () => BigInt(Math.floor(this.now() * 1e6)),
@@ -53,6 +53,15 @@ export class PC {
     this.pit = new PIT(io, this.pics, now);
     this.cmos = new CMOS(io);
     this.misc = new Misc(io, this.pit);
+    // PC speaker: port 0x61 bits 0-1 gate PIT channel 2 onto the speaker.
+    // onSpeaker(hz) gets the tone, 0 for silence, on each change.
+    this.onSpeaker = null; this.speakerHz = 0;
+    this.pit.speaker = () => {
+      const hz = (this.misc.p61 & 3) === 3 ? this.pit.speakerHz() : 0;
+      if (hz === this.speakerHz) return;
+      this.speakerHz = hz;
+      if (this.onSpeaker) this.onSpeaker(hz);
+    };
     this.vgaDev = new VGA(io);
     this.ps2 = new PS2(io, this.pics);
     this.ps2.onIrq = () => this.wakeHlt();
@@ -94,7 +103,7 @@ export class PC {
   irqPendingOrBreathe() {
     const v = this.irqPending();
     if (v >= 0 || !this.sched.breathe()) return BigInt(v);
-    return new Promise((res) => setTimeout(() => res(BigInt(this.irqPending())), 0));
+    return new Promise((res) => soon(() => res(BigInt(this.irqPending()))));
   }
   // HLT: wait for an IRQ.  With IF off that's a halted CPU.
   hltWait() {

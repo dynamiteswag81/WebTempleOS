@@ -1,15 +1,23 @@
 # WebTempleOS — handoff (2026-10-17)
 
-**Could not start the next project (WebLinux):** firing the scheduled task
-trig_01JUHvBA2uNbQJVWrVu46kjG was refused ("created via http_api, not by an
-agent; agents can only fire routines they created").  Start it yourself at
-https://claude.ai/code/routines/trig_01JUHvBA2uNbQJVWrVu46kjG.
-
 **The project's definition of done is met** (see STATUS.md): a browser
 tab served by `node server.cjs` boots TempleOS to its desktop, keyboard and
 mouse work, HolyC at the command line is JIT-compiled by the real Compiler,
 and C: survives a reload (IndexedDB).  `node test/boot.mjs` does the same
 headless.  What follows is how to run it and what could be improved.
+
+**Session 5 (2026-10-17 afternoon, on Windows):**
+- PC speaker sound: port 0x61 + PIT channel 2 -> `PC.onSpeaker(hz)` ->
+  the worker -> a Web Audio square wave in `web/main.js` (starts on the
+  first click/key, as browsers require). `node test/boot.mjs -snd` logs
+  tones; `Beep;` gives 490 Hz for 0.5 s.
+- `_IntDeliver` restores RFLAGS with the new wasm builtin `_SET_RFLAGS_RAW`
+  (no IRQ poll), like IRET. Polling there nested handlers without end when
+  timer ticks were due back to back (seen on a slower Windows machine).
+- `soon()` (runtime/sched.js: setImmediate / MessageChannel) replaces
+  `setTimeout(0)` for yielding to the event loop. setTimeout(0) waits ~15 ms
+  on Windows (4 ms in browsers): the boot spent 80% of its time idle there.
+  The desktop now comes up in under 40 s in Node on that machine.
 
 Goal: a faithful port of TempleOS to WebAssembly. No x86 emulation, no
 networking. TempleOS's own compiler front-end produces intermediate code (ICs),

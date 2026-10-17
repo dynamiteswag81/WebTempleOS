@@ -9,8 +9,30 @@ worker.postMessage({ type: 'start', canvas: off }, [off]);
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') status.textContent = m.text;
+  else if (m.type === 'snd') speaker(m.hz);
   else if (m.type === 'log') { log.textContent += m.text + '\n'; log.scrollTop = log.scrollHeight; }
 };
+// PC speaker: a square wave, like the real thing.  Browsers only allow
+// audio after a user gesture, so the context starts on the first click/key.
+let audio = null, osc = null, gain = null, toneHz = 0;
+function audioStart() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  audio = new AudioContext();
+  osc = audio.createOscillator(); gain = audio.createGain();
+  osc.type = 'square'; gain.gain.value = 0;
+  osc.connect(gain).connect(audio.destination);
+  osc.start();
+  speaker(toneHz);
+}
+function speaker(hz) {
+  toneHz = hz;
+  if (!audio) return;
+  const t = audio.currentTime, on = hz >= 20 && hz <= 20000;
+  if (on) osc.frequency.setValueAtTime(hz, t);
+  gain.gain.setTargetAtTime(on ? 0.06 : 0, t, 0.003);
+}
+for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, audioStart);
+
 worker.onerror = (e) => { status.textContent = 'Worker error: ' + e.message; };
 document.getElementById('logbtn').onclick = () => { log.style.display = log.style.display === 'block' ? 'none' : 'block'; };
 document.getElementById('reset').onclick = () => {

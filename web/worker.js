@@ -34,6 +34,7 @@ async function start(canvas) {
     log(n ? `C: drive: ${n} saved chunks restored from this browser` : 'C: drive: fresh image');
   } catch (e) { store = null; log('IndexedDB unavailable, files will not be kept: ' + e); }
   pc = new PC({ vga: true, disk, layout, log, onDiskWrite: store ? (lba, n) => store.written(lba, n) : null });
+  pc.onSpeaker = (hz) => postMessage({ type: 'snd', hz });
   pc.onHalt = (e) => { status('Halted: ' + (e && e.message)); log(String(e && e.stack)); };
   status('Booting TempleOS... (click the screen to use the mouse)');
   pc.boot(kernel);

@@ -13,6 +13,14 @@ import { OP, T, Bytes, ModuleBuilder } from '../compiler/wasm.js';
 
 export class Halt extends Error {}
 
+// Run cb as soon as the event loop has had a turn.  setTimeout(0) waits
+// 1-4 ms in browsers and ~15 ms on Windows, which made booting crawl.
+export const soon = typeof setImmediate === 'function' ? (cb) => setImmediate(cb) : (() => {
+  const ch = new MessageChannel(), q = [];
+  ch.port1.onmessage = () => q.shift()();
+  return (cb) => { q.push(cb); ch.port2.postMessage(0); };
+})();
+
 export class Sched {
   constructor(m) {
     this.m = m;
@@ -34,14 +42,14 @@ export class Sched {
       // A task busy-waiting alone still has to let the JS event loop run
       // (timers, input, the screen) now and then.
       if (!this.breathe()) return 0n;
-      return new Promise((res) => setTimeout(() => res(0n), 0));
+      return new Promise((res) => soon(() => res(0n)));
     }
     this.switches++;
     const self = { num: this.taskNum(this.cur), sp: m.sp.value, rbp: m.rbp.value, resolve: null };
     const p = new Promise((res) => { self.resolve = res; });
     this.stacks.set(this.cur, self);
     // Runs once this stack has suspended (we return p to it first).
-    if (this.breathe()) setTimeout(() => this.enter(task), 0);
+    if (this.breathe()) soon(() => this.enter(task));
     else queueMicrotask(() => this.enter(task));
     return p;
   }

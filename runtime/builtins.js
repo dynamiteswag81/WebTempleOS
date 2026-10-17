@@ -177,6 +177,9 @@ export const BUILTINS = [
   { name: '_WASM_LOAD', kind: 'js', nargs: 2, ret1: true, js: (m) => (bfh, base) => m.wasmLoad(Number(bfh), Number(base)) },
   { name: '_JIT_COMPILE', kind: 'js', nargs: 2, ret1: true, js: (m) => (cc, type) => m.jit.compile(Number(cc), Number(type)) },
   { name: '_JIT_STORE', kind: 'js', nargs: 2, ret1: true, js: (m) => (cc, res) => m.jit.store(Number(cc), Number(res)) },
+  // U0 SetRFlagsRaw(I64 f): RFLAGS without the IRQ poll (IRET's restore;
+  // the caller's _IrqPoll loop takes what is pending, at the same depth)
+  { name: '_SET_RFLAGS_RAW', kind: 'wasm', gen(by, g) { argI64(by, g, 0).u8(OP.global_set).u32(g.rflags); by.u8(OP.i64_const).s64(0); ret(by, g, 1); } },
 ];
 
 // SYS_POW in KMathA.HC.

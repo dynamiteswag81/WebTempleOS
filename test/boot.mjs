@@ -43,6 +43,8 @@ const pc = new PC({ ramMB: +arg('ram', 1024), trace, disk, layout, vga: !process
 let done;
 const finished = new Promise((r) => { done = r; });
 pc.onHalt = (e) => done(e);
+// -snd: log PC speaker tones (Hz, 0 = off)
+if (process.argv.includes('-snd')) pc.onSpeaker = (hz) => console.log(`speaker ${hz.toFixed(1)} Hz at ${((performance.now() - t0) / 1000).toFixed(2)} s`);
 const t0 = performance.now();
 pc.boot(new Uint8Array(bin.buffer, bin.byteOffset, bin.byteLength));
 const timer = setTimeout(() => done(null), secs * 1000);
