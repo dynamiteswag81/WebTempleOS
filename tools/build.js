@@ -13,7 +13,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'build');
 
 export function buildModule(prj, { builtins = BUILTINS, requireAliases = false, lenient = false, trace = false } = {}) {
-  const backend = new AOTBackend({ builtins, requireAliases, lenient, trace, memPages: MEM_PAGES, memMax: MEM_PAGES });
+  const backend = new AOTBackend({ builtins, requireAliases, lenient, trace, blockTrace: process.env.HCC_BTRACE ? process.env.HCC_BTRACE.split(',') : null, memPages: MEM_PAGES, memMax: MEM_PAGES });
   const boot = new Bootstrap({ roots: [path.join(root, 'port'), path.join(root, 'vendor', 'TempleOS')], backend });
   boot.lenientAsm = lenient;
   boot.hostInit();

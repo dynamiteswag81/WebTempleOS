@@ -15,9 +15,13 @@ const bin = fs.readFileSync(path.join(root, 'build', 'Kernel.BIN'));
 const tracePath = path.join(root, 'build', 'Kernel.trace.json');
 const names = process.argv.includes('-trace') && fs.existsSync(tracePath) ? JSON.parse(fs.readFileSync(tracePath, 'utf8')) : null;
 const ring = [], counts = new Map();
+// -until=Fn: freeze the ring at the first entry of Fn (see what led there)
+const until = arg('until', null);
+const skip = new Set((arg('skip', '') || '').split(',').filter(Boolean).map((n) => names ? names.indexOf(n) : -1));
+let untilId = names && until ? names.indexOf(until) : -1, frozen = false;
 let ncalls = 0, deadline = performance.now() + secs * 1000;
 const trace = names && ((id, sp) => {
-  ring.push([id, Number(sp)]); if (ring.length > 80) ring.shift();
+  if (!frozen && !skip.has(id)) { ring.push([id, Number(sp)]); if (ring.length > +arg('ring', 80)) ring.shift(); if (id === untilId) frozen = true; }
   counts.set(id, (counts.get(id) || 0) + 1);
   if (++ncalls % 1000000 === 0 && performance.now() > deadline) throw new Error('trace: deadline in a synchronous run');
 });

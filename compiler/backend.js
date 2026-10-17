@@ -283,6 +283,8 @@ class Unit {
         this.stack = this.fallStack ? this.fallStack : [];
       }
       entryStack[k] = this.stack.slice();
+      if (be.opts.trace && be.opts.blockTrace && this.fun && be.opts.blockTrace.includes(this.fun.str)) // debug: block entry
+        this.i32(be.traceIdStr(`${this.fun.str}#B${k}`)).gget(g.sp).op(OP.i64_extend_i32_u).call(g.trace);
       this.reloadStack();
       this.fallStack = null;
       let fell = true;
@@ -1062,6 +1064,7 @@ function compressLocals(types) {
 // Used by the bootstrap: one wasm module per CmpJoin (Kernel, Compiler).
 export class AOTBackend {
   constructor(opts = {}) { this.opts = opts; this.log = opts.log || (() => {}); this.traceNames = []; }
+  traceIdStr(s) { this.traceNames.push(s); return this.traceNames.length - 1; }
   traceId(fun) { this.traceNames.push(fun ? fun.str : '<stmt>'); return this.traceNames.length - 1; }
   beginModule(cc, aotc) {
     const mb = this.mb = new ModuleBuilder();

@@ -75,6 +75,7 @@ U0 _TaskContextRestore()
   task->swap_cnter++;
   CtxSwitch(task);
   task=Fs;
+  SetRFlags(task->rflags); //Port: the POPFD; IRQs are taken here if IF is on.
   if (task->rip!=_RET) {//Someone set a new rip ($LK,"Break",A="MN:Break"$, task_end_cb).
     rip=task->rip;
     task->rip=_RET;
@@ -96,7 +97,7 @@ U0 _RestoreTask(CTask *task)
 {//RESTORE_RSI_TASK: run task or the next ready one after it.
   CTask *idle;
 restore_rsi_task:
-  if (sys_ctrl_alt_flags&(1<<CTRL_ALT_DEL|1<<CTRL_ALT_TAB|1<<CTRL_ALT_X|1<<CTRL_ALT_C))
+  if (sys_ctrl_alt_flags[0]&(1<<CTRL_ALT_DEL|1<<CTRL_ALT_TAB|1<<CTRL_ALT_X|1<<CTRL_ALT_C))
     goto handle_sysf_key_event;
 restore_rsi_task2:
   while (TRUE) {

@@ -31,6 +31,12 @@ if (isMainThread) {
       console.log('adam_hc', hc.toString(16), 'sig', dv.getUint32(hc + 8, true).toString(16), 'locked', q(hc + 16), 'alloced', q(hc + 24).toString(16), 'used', q(hc + 32).toString(16), 'last_mergable', q(hc + 64).toString(16));
       let u = q(hc + 72); k = 0;
       while (u && k++ < 8) { console.log('  malloc_free', u.toString(16), 'next', q(u).toString(16), 'size', q(u + 8).toString(16)); u = q(u); }
+      const cpu = 0x100000 + 512, adam = 0x100000 + 768;
+      const t = (x) => x.toString(16);
+      console.log('cpu flags', t(q(cpu + 16)), 'seth', t(q(cpu + 56)), 'idle', t(q(cpu + 64)), 'adam', t(adam));
+      let tk = adam; k = 0;
+      do { console.log('  task', t(tk), 'flags', t(dv.getUint32(tk + 24, true)), 'wake', q(tk + 16), 'rip', t(q(tk + 280)), 'next', t(q(tk + 128))); tk = q(tk + 128); } while (tk && tk !== adam && k++ < 10);
+      if (ex.cnts) console.log('jiffies', q(Number(ex.cnts) + 0x0), 'cnts', t(Number(ex.cnts)));
       for (let i = 0; i < 128; i++) { const h = q(hc + 96 + 8 * i); if (h) console.log('  heap_hash[' + i + ']', h.toString(16), 'next', q(h).toString(16)); }
     }
     w.terminate();

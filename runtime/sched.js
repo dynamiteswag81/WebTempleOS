@@ -19,6 +19,7 @@ export class Sched {
     this.cur = 0;          // CTask * running now (0: none yet)
     this.stacks = new Map(); // CTask * -> {num, sp, rbp, resolve}
     this.switches = 0;
+    this.lastBreath = performance.now();
     this.start = WebAssembly.promising(taskStartFunc(m));
   }
   get off() { return this.m.port; }
@@ -28,14 +29,28 @@ export class Sched {
   switchTo(task) {
     const m = this.m;
     if (!this.cur) { this.cur = task; return 0n; } // the boot stack becomes task's
-    if (task === this.cur) return 0n;
+    if (task === this.cur) {
+      m.rflags.value = m.dv.getBigInt64(task + this.off.rflags, true); // IRET
+      // A task busy-waiting alone still has to let the JS event loop run
+      // (timers, input, the screen) now and then.
+      if (!this.breathe()) return 0n;
+      return new Promise((res) => setTimeout(() => res(0n), 0));
+    }
     this.switches++;
     const self = { num: this.taskNum(this.cur), sp: m.sp.value, rbp: m.rbp.value, resolve: null };
     const p = new Promise((res) => { self.resolve = res; });
     this.stacks.set(this.cur, self);
     // Runs once this stack has suspended (we return p to it first).
-    queueMicrotask(() => this.enter(task));
+    if (this.breathe()) setTimeout(() => this.enter(task), 0);
+    else queueMicrotask(() => this.enter(task));
     return p;
+  }
+  // true about every 10 ms: time to give the event loop a turn
+  breathe() {
+    const t = performance.now();
+    if (t - this.lastBreath < 10) return false;
+    this.lastBreath = t;
+    return true;
   }
 
   enter(task) {
