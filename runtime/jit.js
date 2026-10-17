@@ -13,6 +13,7 @@ import { BUILTINS } from './builtins.js';
 import { intermediate_code_table } from '../compiler/opt.js';
 
 const WASM_TAG = 0x4D534157, WBLT_TAG = 0x544C4257;
+export const JIT_TRACE_BASE = 1 << 24;
 const LABEL_DATA = new Set([...BRANCH_CODES, K.IC_LABEL, K.IC_GET_LABEL]);
 LABEL_DATA.delete(K.IC_RET); LABEL_DATA.delete(K.IC_LEAVE);
 LABEL_DATA.delete(K.IC_SWITCH); LABEL_DATA.delete(K.IC_NOBOUND_SWITCH);
@@ -24,6 +25,8 @@ export class JIT {
     this.builtins = BUILTINS.map((b, i) => ({ ...b, i }));
     this.pending = null;
     this.units = 0; this.ms = 0;
+    this.traceNames = [];
+    if (pc.tracing) this.opts.trace = true;
   }
   get dv() { return this.pc.dv; }
   q(a) { return this.dv.getBigInt64(a, true); }
@@ -199,8 +202,10 @@ export class JIT {
     by.u8(OP.i32_const).s32(a).u8(OP.i32_load).u32(2).u32(0);
     by.u8(OP.call_indirect).u32(this.fnType).u32(0).u8(OP.drop);
   }
-  traceId() { return 0; }
-  traceIdStr() { return 0; }
+  // with a trace import (debugging), JIT'd functions report their entry too:
+  // ids from JIT_TRACE_BASE name this.traceNames[id-JIT_TRACE_BASE]
+  traceId(fun) { this.traceNames.push(fun ? fun.str : '<stmt>'); return JIT_TRACE_BASE + this.traceNames.length - 1; }
+  traceIdStr(s) { this.traceNames.push(s); return JIT_TRACE_BASE + this.traceNames.length - 1; }
   markerExpr(u) { this.absAddrOfBlob(u, 0); }
   absAddrOfBlob(u, off) { u.absAddr(this.blob.addr + off); }
   selfAddr(u) { this.absAddrOfBlob(u, 0); }

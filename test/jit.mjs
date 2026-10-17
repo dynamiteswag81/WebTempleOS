@@ -9,8 +9,10 @@ import { PC } from '../runtime/pc.js';
 import { intermediate_code_table } from '../compiler/opt.js';
 import { buildImage, standardTree, treePut } from '../tools/mkdisk.js';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// -adam: run test/hca/*.HC after Adam is loaded (MakeAdam, as StartOS.HC does)
+const adam = process.argv.includes('-adam'), dir = adam ? 'hca' : 'hc';
 const only = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-const files = fs.readdirSync(path.join(root, 'test', 'hc')).filter((f) => f.endsWith('.HC') && (!only.length || only.some((o) => f.includes(o))));
+const files = fs.readdirSync(path.join(root, 'test', dir)).filter((f) => f.endsWith('.HC') && (!only.length || only.some((o) => f.includes(o))));
 const enc = (s) => new Uint8Array(Buffer.from(s, 'latin1'));
 
 const prelude = `_extern _DBG_PUTC U0 DbgPutC(U8 ch);
@@ -19,16 +21,18 @@ U0 TPI(I64 i) { U8 buf[32]; StrPrint(buf,"%d",i); TPS(buf); }
 U0 TPF(F64 d) { U8 buf[32]; StrPrint(buf,"F:%X",d(I64)); TPS(buf); }
 `;
 const tree = standardTree(root);
-let start = `#include "/Kernel/KernelA.HH"
+let start = `public extern I8i Option(I64i num,I8i val);
+Option(0,0);
+#include "/Kernel/KernelA.HH"
 #include "/Compiler/CompilerA.HH"
 #include "/Kernel/KernelB.HH"
 #include "/Kernel/KernelC.HH"
 #include "/Compiler/CompilerB.HH"
-#include "/Test/Prelude.HC"
+${adam ? 'Option(OPTf_WARN_PAREN,ON);\nOption(OPTf_WARN_DUP_TYPES,ON);\nHashTablePurge(adam_task->hash_table);\n#include "/Adam/MakeAdam"\n' : ''}#include "/Test/Prelude.HC"
 `;
 treePut(tree, 'Test/Prelude.HC', enc(prelude));
 for (const f of files) {
-  const src = fs.readFileSync(path.join(root, 'test', 'hc', f), 'latin1')
+  const src = fs.readFileSync(path.join(root, 'test', dir, f), 'latin1')
     .split('\n').filter((l) => !/^(#include|_extern __TP|_intern )/.test(l)).join('\n');
   treePut(tree, 'Test/' + f, enc(src));
   start += `TPS("@@BEGIN ${f}");\n#include "/Test/${f}"\n`;
@@ -38,7 +42,7 @@ treePut(tree, 'StartOS.HC', enc(start));
 const { img } = buildImage(tree, { mb: 64 });
 const layout = JSON.parse(fs.readFileSync(path.join(root, 'build', 'layout.json'), 'utf8'));
 const lines = [];
-const pc = new PC({ disk: img, layout, log: (s) => { if (s.startsWith('dbg: ')) lines.push(s.slice(5)); else if (!s.startsWith('io:')) console.log(s); } });
+const pc = new PC({ disk: img, layout, vga: process.argv.includes('-vga'), log: (s) => { if (s.startsWith('dbg: ')) lines.push(s.slice(5)); else if (!s.startsWith('io:')) console.log(s); } });
 if (process.env.JIT_DUMP) pc.jit.dump = (u) => u.ics.some((t) => (intermediate_code_table[t.code] || {}).name === process.env.JIT_DUMP);
 let done;
 const fin = new Promise((r) => { done = r; });
@@ -53,7 +57,7 @@ if (process.argv.includes("-v")) console.log(lines.join("\n"));
 const f2s = (h) => { const dv = new DataView(new ArrayBuffer(8)); dv.setBigUint64(0, BigInt('0x' + h)); return String(dv.getFloat64(0)); };
 let fail = 0;
 for (const f of files) {
-  const want = fs.readFileSync(path.join(root, 'test', 'hc', f), 'latin1').split(/\r?\n/).filter((l) => l.startsWith('//> ')).map((l) => l.slice(4));
+  const want = fs.readFileSync(path.join(root, 'test', dir, f), 'latin1').split(/\r?\n/).filter((l) => l.startsWith('//> ')).map((l) => l.slice(4));
   const b = lines.indexOf('@@BEGIN ' + f);
   let k = b + 1; const got = [];
   while (b >= 0 && k < lines.length && !lines[k].startsWith('@@BEGIN') && lines[k] !== '@@END') got.push(lines[k++]);
@@ -67,5 +71,11 @@ for (const f of files) {
   }
 }
 console.log(`--- ${((Date.now() - t0) / 1000).toFixed(1)} s, jit ${pc.jit.units} units ${(pc.jit.ms / 1000).toFixed(1)} s` + (e ? ', halted: ' + (e.stack || e) : ''));
-if (e && e.message !== 'timeout') console.log(pc.textScreen());
+if (e && !pc.vga) console.log(pc.textScreen());
+if (pc.vga) {
+  const { png } = await import('./png.mjs');
+  const rgba = new Uint32Array(640 * 480);
+  pc.vgaDev.render(pc.u8, rgba);
+  fs.writeFileSync(path.join(root, 'build', 'jit.png'), png(640, 480, new Uint8Array(rgba.buffer)));
+}
 process.exit(fail || e ? 1 : 0);

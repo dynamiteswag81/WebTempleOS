@@ -264,6 +264,7 @@ U0 KStartWasm()
   PortSet(PORT_TASK_RFLAGS,offset(CTask.rflags));
   PortSet(PORT_TASK_NUM,offset(CTask.task_num));
   PortSet(PORT_TASK_NAME,offset(CTask.task_name));
+  PortSet(PORT_IRQ_DEPTH,&port_irq_depth);
   PortSet(PORT_BOOTED,0);
   CtxSwitch(Fs); //The boot stk becomes Adam's.
   SetRSP(Fs->rsp);

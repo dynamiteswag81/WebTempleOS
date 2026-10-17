@@ -39,10 +39,12 @@ U0 _IntDeliver(I64 vec)
   I64 rflags=GetRFlags,old_irq_rflags=port_irq_rflags;
   port_irq_rflags=rflags;
   SetRFlags(rflags&~(1<<RFLAGf_INT));
+  port_irq_depth++;
   if (dbg.int_fault_code<=fp<dbg.int_fault_code+256*7)
     _IntFault((fp-dbg.int_fault_code)/7);
   else
     Call(fp);
+  port_irq_depth--;
   port_irq_rflags=old_irq_rflags;
   SetRFlags(rflags);
 }

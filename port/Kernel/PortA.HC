@@ -8,7 +8,9 @@
 #define PORT_TASK_NUM		5
 #define PORT_TASK_NAME		6
 #define PORT_BOOTED		7
+#define PORT_IRQ_DEPTH		8
 _extern _PORT_SET U0 PortSet(I64 key,I64 val); //Port: tell the JS runtime.
+I64 port_irq_depth; //Port: how many IRQ handlers this stack is inside of.
 //_FLOOR,_CEIL,_TRUNC,_ROUND are wasm builtins and _POW,_POW10,_EXP,
 //_LN,_LOG2,_LOG10,_ARG are JS builtins (see runtime/builtins.js).
 

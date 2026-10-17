@@ -23,6 +23,7 @@ export class PC {
     this.log = log;
     this.ramMB = ramMB;
     this.vga = vga;
+    this.tracing = !!trace;
     this.now = now;
     this.port = {};
     this.RET = builtinAddr('_RET');
@@ -71,7 +72,7 @@ export class PC {
 
   // ---- JS services of the builtins
   portSet(k, v) {
-    const names = { 1: 'rip', 2: 'rsp', 3: 'rbp', 4: 'rflags', 5: 'taskNum', 6: 'taskName' };
+    const names = { 1: 'rip', 2: 'rsp', 3: 'rbp', 4: 'rflags', 5: 'taskNum', 6: 'taskName', 8: 'irqDepthAddr' };
     if (names[k]) this.port[names[k]] = Number(v);
     else if (k === 7) this.booted = true;
   }

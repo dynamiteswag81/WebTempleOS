@@ -69,13 +69,17 @@ U0 _TaskContextRestore()
 {//Fs is the task to run.  Returns when this stack's task runs again.
   CTask *task=Fs;
   U8 *rip;
+  I64 depth;
   Gs->swap_cnter++;
   if (Bt(&task->rflags,RFLAGf_INT))
     LBts(&Gs->cpu_flags,CPUf_RAN_A_TASK);
   task->swap_cnter++;
+  depth=port_irq_depth;
   CtxSwitch(task);
+  port_irq_depth=depth; //(Each stack has its own.)
   task=Fs;
-  SetRFlags(task->rflags); //Port: the POPFD; IRQs are taken here if IF is on.
+  if (!depth) //Port: the POPFD.  In an IRQ handler, $LK,"_IntDeliver",A="MN:_IntDeliver"$'s IRET does it.
+    SetRFlags(task->rflags);
   if (task->rip!=_RET) {//Someone set a new rip ($LK,"Break",A="MN:Break"$, task_end_cb).
     rip=task->rip;
     task->rip=_RET;

@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { PC } from '../runtime/pc.js';
 import { png } from './png.mjs';
+import { JIT_TRACE_BASE } from '../runtime/jit.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (n, d) => { const a = process.argv.find((x) => x.startsWith(`-${n}=`)); return a ? a.slice(n.length + 2) : d; };
@@ -16,19 +17,20 @@ const bin = fs.readFileSync(path.join(root, 'build', 'Kernel.BIN'));
 const tracePath = path.join(root, 'build', 'Kernel.trace.json');
 const names = process.argv.includes('-trace') && fs.existsSync(tracePath) ? JSON.parse(fs.readFileSync(tracePath, 'utf8')) : null;
 const ring = [], counts = new Map();
+const nameOf = (id) => (id >= JIT_TRACE_BASE ? 'jit:' + pc.jit.traceNames[id - JIT_TRACE_BASE] : names[id]);
 // -until=Fn: freeze the ring at the first entry of Fn (see what led there)
 const until = arg('until', null);
-const skip = new Set((arg('skip', '') || '').split(',').filter(Boolean).map((n) => names ? names.indexOf(n) : -1));
+const skip = new Set((arg('skip', '') || '').split(',').filter(Boolean));
 // -args=Fn,..: print the first 3 args (and the strings they point to) at each entry of Fn
-const argFns = new Set((arg('args', '') || '').split(',').filter(Boolean).map((n) => names ? names.indexOf(n) : -1));
+const argFns = new Set((arg('args', '') || '').split(',').filter(Boolean));
 const cstrAt = (a) => { let s = ''; if (a <= 0 || a >= 2 ** 32) return null; for (let i = 0; i < 40; i++) { const c = pc.u8[a + i]; if (!c) break; if (c < 32 || c > 126) return s ? s + '?' : null; s += String.fromCharCode(c); } return s; };
 let untilId = names && until ? names.indexOf(until) : -1, frozen = false;
 let ncalls = 0, deadline = performance.now() + secs * 1000;
 const trace = names && ((id, sp) => {
-  if (!frozen && !skip.has(id)) { ring.push([id, Number(sp)]); if (ring.length > +arg('ring', 80)) ring.shift(); if (id === untilId) frozen = true; }
-  if (argFns.has(id)) {
+  if (!frozen && !skip.has(nameOf(id).replace(/^jit:/, ''))) { ring.push([id, Number(sp)]); if (ring.length > +arg('ring', 80)) ring.shift(); if (id === untilId || nameOf(id) === 'jit:' + until) frozen = true; }
+  if (argFns.size && argFns.has(nameOf(id).replace(/^jit:/, ''))) {
     const a = [1, 2, 3, 4, 5].map((k) => Number(pc.dv.getBigInt64(Number(sp) + 8 * k, true)));
-    console.log(`${names[id]}(${a.map((x) => x.toString(16) + (cstrAt(x) !== null ? ' "' + cstrAt(x) + '"' : '')).join(', ')})`);
+    console.log(`${nameOf(id)}(${a.map((x) => x.toString(16) + (cstrAt(x) !== null ? ' "' + cstrAt(x) + '"' : '')).join(', ')})`);
   }
   counts.set(id, (counts.get(id) || 0) + 1);
   if (++ncalls % 1000000 === 0 && performance.now() > deadline) throw new Error('trace: deadline in a synchronous run');
@@ -58,9 +60,9 @@ if (pc.vga) {
 } else console.log(pc.textScreen());
 if (names) {
   console.log('--- last calls (fn sp):');
-  for (const [id, sp] of ring) console.log(names[id] + ' ' + sp.toString(16));
+  for (const [id, sp] of ring) console.log(nameOf(id) + ' ' + sp.toString(16));
   console.log('--- most called:');
-  for (const [id, n] of [...counts].sort((a, b) => b[1] - a[1]).slice(0, 15)) console.log(names[id] + ' ' + n);
+  for (const [id, n] of [...counts].sort((a, b) => b[1] - a[1]).slice(0, 15)) console.log(nameOf(id) + ' ' + n);
 }
 if (arg('savedisk', null) && disk) fs.writeFileSync(arg('savedisk'), disk);
 if (e) { console.log('--- halted:', e.stack || e); process.exit(1); }

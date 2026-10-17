@@ -8,6 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { repairDoc } from './binfix.js';
 
 export const BLK = 512;
 const CDIR = 64, NAME_LEN = 38;
@@ -93,15 +94,18 @@ export function buildImage(tree, { mb = 128, date = new Date() } = {}) {
 }
 
 // Read a host directory into a tree; later roots override earlier ones.
-export function addHostDir(tree, dir, { skip = () => false } = {}) {
+export function addHostDir(tree, dir, { skip = () => false, fix = null } = {}) {
   for (const de of fs.readdirSync(dir, { withFileTypes: true })) {
     const hp = path.join(dir, de.name);
     if (skip(hp, de)) continue;
     if (de.isDirectory()) {
       let sub = tree.get(de.name);
       if (!(sub instanceof Map)) tree.set(de.name, sub = new Map());
-      addHostDir(sub, hp, { skip });
-    } else if (de.isFile()) tree.set(de.name, new Uint8Array(fs.readFileSync(hp)));
+      addHostDir(sub, hp, { skip, fix });
+    } else if (de.isFile()) {
+      const data = new Uint8Array(fs.readFileSync(hp));
+      tree.set(de.name, fix ? fix(de.name, data) : data);
+    }
   }
   return tree;
 }
@@ -112,12 +116,20 @@ export function treePut(tree, p, data) {
   t.set(parts[parts.length - 1], data);
 }
 
+// DolDoc files whose sprite bins the upstream extraction damaged (see
+// tools/binfix.js) are repaired; the few that can't be keep their bytes.
+function fixDoc(name, data) {
+  if (!/\.(HC|DD|HH|IN|TXT)$/.test(name) || data.indexOf(0) < 0) return data;
+  return repairDoc(data) || data;
+}
+
 // The standard C: drive.
 export function standardTree(root) {
   const tree = new Map();
-  addHostDir(tree, path.join(root, 'vendor', 'TempleOS'), { skip: (hp, de) => de.name === '.git' });
+  addHostDir(tree, path.join(root, 'vendor', 'TempleOS'), { skip: (hp, de) => de.name === '.git', fix: fixDoc });
   addHostDir(tree, path.join(root, 'port'));
-  for (const [bin, dst] of [['Kernel.BIN', '0000Boot/0000Kernel.BIN.C'], ['Compiler.BIN', 'Compiler/Compiler.BIN']]) {
+  for (const [bin, dst] of [['Kernel.BIN', '0000Boot/0000Kernel.BIN.C'], ['Compiler.BIN', 'Compiler/Compiler.BIN'],
+    ['Kernel.MAP', 'Kernel/Kernel.MAP'], ['Compiler.MAP', 'Compiler/Compiler.MAP']]) {
     const hp = path.join(root, 'build', bin);
     if (fs.existsSync(hp)) treePut(tree, dst, new Uint8Array(fs.readFileSync(hp)));
   }

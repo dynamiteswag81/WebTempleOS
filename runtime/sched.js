@@ -30,7 +30,7 @@ export class Sched {
     const m = this.m;
     if (!this.cur) { this.cur = task; return 0n; } // the boot stack becomes task's
     if (task === this.cur) {
-      m.rflags.value = m.dv.getBigInt64(task + this.off.rflags, true); // IRET
+      // (RFLAGS: _TaskContextRestore or _IntDeliver restores them.)
       // A task busy-waiting alone still has to let the JS event loop run
       // (timers, input, the screen) now and then.
       if (!this.breathe()) return 0n;
@@ -56,7 +56,6 @@ export class Sched {
   enter(task) {
     const m = this.m, dv = m.dv, off = this.off;
     this.cur = task;
-    m.rflags.value = dv.getBigInt64(task + off.rflags, true); // IRET
     const s = this.stacks.get(task);
     if (s) this.stacks.delete(task);
     if (s && s.num === this.taskNum(task)) {
@@ -66,6 +65,8 @@ export class Sched {
     }
     // A new task (or one whose CTask memory was reused): start it.  [rsp]
     // is its return addr (&Exit for Spawn), its args are above that.
+    m.rflags.value = dv.getBigInt64(task + off.rflags, true); // IRET into the new task
+    if (off.irqDepthAddr) dv.setBigInt64(off.irqDepthAddr, 0n, true);
     const rip = Number(dv.getBigInt64(task + off.rip, true));
     dv.setBigInt64(task + off.rip, BigInt(m.RET), true);
     m.sp.value = Number(dv.getBigInt64(task + off.rsp, true));
