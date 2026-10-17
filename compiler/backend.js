@@ -1269,9 +1269,10 @@ export class AOTBackend {
       if (bi) { u.call(this.builtinSlot(bi).idx); return; }
       s = this.byRip.get(rip);
       if (!s) {
-        // an _extern'ed asm label: rip of something that is not a compiled unit
-        if (!this.opts.lenient) u.err(`IC_CALL to unknown code at rip ${rip}`, t);
-        u.op(OP.unreachable);
+        // an _extern'ed asm label: not a compiled unit, so call through the
+        // descriptor stored there at run time (see port/Compiler/CMisc.HC)
+        u.absAddr(rip); u.addr(); u.mem(OP.i32_load, 2);
+        u.b.u8(OP.call_indirect).u32(this.fnType).u32(0);
         return;
       }
     }
@@ -1282,3 +1283,6 @@ export class AOTBackend {
 function debugListing(prog) {
   return prog.ics.map((t) => ICNAME(t.code)).join(' ');
 }
+
+// The runtime JIT (runtime/jit.js) builds its own modules around Unit.
+export { Unit, addHelpers, BRANCH_CODES };

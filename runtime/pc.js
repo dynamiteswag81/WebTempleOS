@@ -8,6 +8,7 @@ import { Sched, Halt } from './sched.js';
 import { IOBus, PICs, PIT, CMOS, Misc } from './devices.js';
 import { ATADisk } from './ata.js';
 import { PS2, charScan } from './ps2.js';
+import { JIT } from './jit.js';
 
 export const MEM_PAGES = 65536; // 4 GB: the uncached alias wraps to 0 (HANDOFF.md)
 const GB = 0x100000000;
@@ -17,7 +18,7 @@ const BOOT_SRC_HARDDRV = 3;
 const builtinAddr = (name) => BUILTIN_BASE + 8 * BUILTINS.findIndex((b) => b.name === name);
 
 export class PC {
-  constructor({ ramMB = 1024, vga = false, log = console.log, now = () => performance.now(), trace = null, disk = null, onDiskWrite = null } = {}) {
+  constructor({ ramMB = 1024, vga = false, log = console.log, now = () => performance.now(), trace = null, disk = null, onDiskWrite = null, layout = null } = {}) {
     this.log = log;
     this.ramMB = ramMB;
     this.vga = vga;
@@ -28,7 +29,13 @@ export class PC {
     this.waiters = [];
     const js = {};
     const m = this.m = new Machine({ memPages: MEM_PAGES, imports: { js, env: {
-      in: (port, size) => BigInt(this.io.in(port, size) >>> 0),
+      // Polling loops (the debugger's keyboard poll runs with IRQs off) let
+      // the event loop run here too: 'in' may suspend (JSPI).
+      in: new WebAssembly.Suspending((port, size) => {
+        const v = BigInt(this.io.in(port, size) >>> 0);
+        if (!this.sched.breathe()) return v;
+        return new Promise((res) => setTimeout(() => res(v), 0));
+      }),
       out: (port, val, size) => this.io.out(port, Number(BigInt.asUintN(32, val)), size),
       rdtsc: () => BigInt(Math.floor(this.now() * 1e6)),
       ...(trace ? { trace } : {}),
@@ -48,6 +55,8 @@ export class PC {
     this.ps2.onIrq = () => this.wakeHlt();
     if (disk) this.ata = new ATADisk(io, disk, { onWrite: onDiskWrite });
     this.sched = new Sched(this);
+    this.layout = layout;
+    if (layout) this.jit = new JIT(this, layout);
   }
   get dv() { return this.m.dv; }
   get u8() { return this.m.u8; }
@@ -75,6 +84,14 @@ export class PC {
   irqPending() {
     this.pit.update();
     return this.pics.ack();
+  }
+  // _IrqPoll's IrqPending(): code that polls (raw mode GetKey, busy waits)
+  // gets here often, so this is where a spinning task lets the JS event
+  // loop run (input, timers, the screen) about every 10 ms.
+  irqPendingOrBreathe() {
+    const v = this.irqPending();
+    if (v >= 0 || !this.sched.breathe()) return BigInt(v);
+    return new Promise((res) => setTimeout(() => res(BigInt(this.irqPending())), 0));
   }
   // HLT: wait for an IRQ.  With IF off that's a halted CPU.
   hltWait() {
@@ -107,6 +124,16 @@ export class PC {
       this.key(k[0], false); this.key(k[0], true);
       if (k[1]) this.key(0x2A, true);
     }
+  }
+  // Load(): instantiate the wasm module a BIN carries (see wasmload.js binInfo)
+  wasmLoad(bfh, base) {
+    const dv = this.dv;
+    const size = Number(dv.getBigInt64(bfh + 24, true));
+    if (size < 16 || dv.getUint32(bfh + size - 8, true) !== 0x4D534157) return 0n;
+    const off = dv.getUint32(bfh + size - 16, true), len = dv.getUint32(bfh + size - 12, true);
+    const ntable = dv.getUint32(bfh + size - 4, true);
+    this.m.instantiate(this.u8.slice(bfh + off, bfh + off + len), base, ntable);
+    return 0n;
   }
   dbgPutc(ch) { this.dbgLine = (this.dbgLine || '') + String.fromCharCode(ch); if (ch === 10) { this.log('dbg: ' + this.dbgLine.trimEnd()); this.dbgLine = ''; } }
   fail(e) {

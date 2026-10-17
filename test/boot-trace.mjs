@@ -46,7 +46,7 @@ if (isMainThread) {
   const { PC } = await import('../runtime/pc.js');
   const a = new Int32Array(workerData.sab);
   const { parentPort } = await import('worker_threads');
-  const pc = new PC({ log: (s) => parentPort.postMessage(s), trace: (id, sp) => {
+  const pc = new PC({ layout: JSON.parse(fs.readFileSync(path.join(root, 'build', 'layout.json'), 'utf8')), disk: new Uint8Array(fs.readFileSync(path.join(root, 'build', 'C.img'))), log: (s) => parentPort.postMessage(s), trace: (id, sp) => {
     const n = a[0]; const k = n % N; a[2 + 2 * k] = id; a[3 + 2 * k] = Number(sp); Atomics.store(a, 0, n + 1);
   } });
   pc.onHalt = (e) => parentPort.postMessage('halt: ' + (e.stack || e));

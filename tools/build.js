@@ -8,6 +8,7 @@ import { Bootstrap } from '../compiler/aot.js';
 import { AOTBackend } from '../compiler/backend.js';
 import { BUILTINS } from '../runtime/builtins.js';
 import { MEM_PAGES } from '../runtime/pc.js';
+import { classOffsets, RUNTIME_CLASSES } from './offsets.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'build');
@@ -33,6 +34,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const r = buildModule(prj, t === 'Kernel' ? { requireAliases: true, trace } : { lenient: process.argv.includes('-lenient'), trace });
     fs.writeFileSync(path.join(out, t + '.BIN'), r.bin);
     if (trace) fs.writeFileSync(path.join(out, t + '.trace.json'), JSON.stringify(r.traceNames));
+    if (t === 'Kernel') fs.writeFileSync(path.join(out, 'layout.json'), JSON.stringify(classOffsets(RUNTIME_CLASSES)));
     console.log(`${t}.BIN: ${r.bin.length} bytes (image ${r.aot.aot_U8s}, wasm ${r.aot.wasm.length}), ${Date.now() - t0} ms`);
   }
 }

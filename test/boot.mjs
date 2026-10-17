@@ -35,7 +35,8 @@ const trace = names && ((id, sp) => {
 const imgPath = path.join(root, 'build', 'C.img');
 const disk = fs.existsSync(imgPath) ? new Uint8Array(fs.readFileSync(imgPath)) : null;
 if (!disk) console.log('(no build/C.img: run node tools/mkdisk.js)');
-const pc = new PC({ ramMB: +arg('ram', 1024), trace, disk });
+const layout = JSON.parse(fs.readFileSync(path.join(root, 'build', 'layout.json'), 'utf8'));
+const pc = new PC({ ramMB: +arg('ram', 1024), trace, disk, layout });
 let done;
 const finished = new Promise((r) => { done = r; });
 pc.onHalt = (e) => done(e);

@@ -107,7 +107,7 @@ export const BUILTINS = [
   // U0 _CtxSwitch(CTask *task): run task's context (see runtime/sched.js).
   { name: '_CTX_SWITCH', kind: 'js', nargs: 1, ret1: true, suspend: true, js: (m) => (task) => m.sched.switchTo(Number(task)) },
   { name: '_HLT_WAIT', kind: 'js', nargs: 0, suspend: true, js: (m) => () => m.hltWait() },
-  { name: '_IRQ_PENDING', kind: 'js', nargs: 0, js: (m) => () => BigInt(m.irqPending()) },
+  { name: '_IRQ_PENDING', kind: 'js', nargs: 0, suspend: true, js: (m) => () => m.irqPendingOrBreathe() },
   { name: '_DBG_PUTC', kind: 'js', nargs: 1, ret1: true, js: (m) => (ch) => { m.dbgPutc(Number(ch & 0xFFn)); return 0n; } },
   // ---- KMathA
   { name: '_FLOOR', kind: 'wasm', gen: fround(OP.f64_floor) },
@@ -173,6 +173,10 @@ export const BUILTINS = [
   { name: '_INT', kind: 'alias', target: '_IntDeliver' },         // INT n (arg n)
   // ---- port runtime services
   { name: '_PORT_SET', kind: 'js', nargs: 2, ret1: true, js: (m) => (k, v) => { m.portSet(Number(k), v); return 0n; } },
+  // ---- Load() and the Compiler's wasm back-end (runtime/jit.js)
+  { name: '_WASM_LOAD', kind: 'js', nargs: 2, ret1: true, js: (m) => (bfh, base) => m.wasmLoad(Number(bfh), Number(base)) },
+  { name: '_JIT_COMPILE', kind: 'js', nargs: 2, ret1: true, js: (m) => (cc, type) => m.jit.compile(Number(cc), Number(type)) },
+  { name: '_JIT_STORE', kind: 'js', nargs: 2, ret1: true, js: (m) => (cc, res) => m.jit.store(Number(cc), Number(res)) },
 ];
 
 // SYS_POW in KMathA.HC.
