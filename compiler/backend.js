@@ -78,7 +78,7 @@ export function moduleImports(mb, { tableMin = 1, memPages = 16384, memMax = 163
 }
 
 // Small helper functions compiled into every module.
-function addHelpers(mb, g) {
+function addHelpers(mb, g, be) {
   const h = {};
   const fn = (name, params, results, locals, build) => {
     const r = mb.reserveFunc(params, results, name);
@@ -92,12 +92,12 @@ function addHelpers(mb, g) {
   for (const [name, op, signed, isRem] of [['$div_s', OP.i64_div_s, true, false], ['$div_u', OP.i64_div_u, false, false],
     ['$rem_s', OP.i64_rem_s, true, true], ['$rem_u', OP.i64_rem_u, false, true]]) {
     fn(name, [T.i64, T.i64], [T.i64], [], (b) => {
-      b.u8(OP.local_get).u32(1).u8(OP.i64_eqz).u8(OP.if).u8(T.void).u8(OP.call).u32(g.divzero).u8(OP.end);
+      b.u8(OP.local_get).u32(1).u8(OP.i64_eqz).u8(OP.if).u8(T.void); be.hook(b, '_INT_DIVZERO', g.divzero); b.u8(OP.end);
       if (signed) {
         // MIN/-1 overflows in IDIV (#DE)
         b.u8(OP.local_get).u32(1).u8(OP.i64_const).s64(-1n).u8(OP.i64_eq);
         b.u8(OP.local_get).u32(0).u8(OP.i64_const).s64(-0x8000000000000000n).u8(OP.i64_eq);
-        b.u8(OP.i32_and).u8(OP.if).u8(T.void).u8(OP.call).u32(g.divzero).u8(OP.end);
+        b.u8(OP.i32_and).u8(OP.if).u8(T.void); be.hook(b, '_INT_DIVZERO', g.divzero); b.u8(OP.end);
       }
       b.u8(OP.local_get).u32(0).u8(OP.local_get).u32(1).u8(op);
     });
@@ -961,14 +961,19 @@ class Unit {
     this.lget(this.L.ti).i64(LABEL_LIMIT).op(OP.i64_lt_u);
     this.op(OP.if).u8(T.void); this.extra++;
     this.lget(this.L.ti).i64(CATCH_END).op(OP.i64_eq);
-    this.op(OP.if).u8(T.void); this.call(this.be.g.catch_end).op(OP.unreachable).op(OP.end);
+    this.op(OP.if).u8(T.void); this.be.hook(this.b, '_CATCH_END', this.be.g.catch_end); this.op(OP.unreachable).op(OP.end);
     this.lget(this.L.ti).op(OP.i32_wrap_i64).i32(1).op(OP.i32_sub).lset(this.L.state);
     this.op(OP.br).u32(this.blocks.length - 1 - this.curBlock + this.extra);
     this.extra--; this.op(OP.end);
     this.lget(this.L.rax).op(OP.return);
   }
 
-  irqCheck() { /* interrupts are delivered at Yield/HLT/PAUSE (see runtime) */ }
+  // STI/POPFD: IRQs that became deliverable are taken here (_Sti polls).
+  irqCheck() {
+    if (!this.be.builtinIndex('_STI')) return;
+    this.gget(this.be.g.rflags).i64(0x200n).op(OP.i64_and).op(OP.i32_wrap_i64);
+    this.op(OP.if).u8(T.void); this.be.hook(this.b, '_STI', null); this.op(OP.end);
+  }
 
   // IC_ASM: the operand-less instructions HolyC uses inline.
   asmIC(t) {
@@ -981,14 +986,16 @@ class Unit {
       else if (b0 === 0xFB) { this.gget(g.rflags).i64(IF).op(OP.i64_or).gset(g.rflags); p++; this.irqCheck(); }
       else if (b0 === 0x9C) { this.gget(g.rflags).push(I); p++; }
       else if (b0 === 0x9D) { this.pop64().gset(g.rflags); p++; this.irqCheck(); }
-      else if (b0 === 0xF3 && bytes[p + 1] === 0x90) { this.call(g.pause); p += 2; }
-      else if (b0 === 0xF4) { this.call(g.hlt); p++; }
+      else if (b0 === 0xF3 && bytes[p + 1] === 0x90) { this.be.hook(this.b, '_PAUSE', g.pause); p += 2; }
+      else if (b0 === 0xF4) { this.be.hook(this.b, '_HLT', g.hlt); p++; }
+      else if (b0 === 0xCD) { this.i64(bytes[p + 1]).push(I); this.be.hook(this.b, '_INT', null); p += 2; } // INT n: _IntDeliver(n)
       else if (b0 === 0x90 || b0 === 0xFC || b0 === 0xFD || b0 === 0x9B || b0 === 0xCC) p++;
       else if (b0 === 0x0F && (bytes[p + 1] === 0x09 || bytes[p + 1] === 0x08)) p += 2;
       else if (b0 === 0x0F && bytes[p + 1] === 0xAE) p += 3;
       else if (b0 === 0xDB && bytes[p + 1] === 0xE3) p += 2;
       else if (b0 === 0x0F && bytes[p + 1] === 0xA2) { this.call(g.cpuid); p += 2; }
       else if (b0 === 0x0F && bytes[p + 1] === 0x31) { this.call(g.rdtsc).op(OP.drop); p += 2; }
+      else if (b0 === 0x0F && bytes[p + 1] === 0x20 && bytes[p + 2] === 0xD0) { this.i64(0).lset(this.L.rax); p += 3; } // MOV_RAX_CR2: no page faults
       else this.err(`asm byte 0x${b0.toString(16)} not translatable`, t);
     }
   }
@@ -1050,7 +1057,7 @@ export class AOTBackend {
       this.jsImports.set(b.name, mb.importFunc('js', b.name, new Array(b.nargs).fill(T.i64), [T.i64]));
     this.g = moduleImports(mb, this.opts);
     this.fnType = mb.type([], [T.i64]);
-    this.h = addHelpers(mb, this.g);
+    this.h = addHelpers(mb, this.g, this);
     this.byFun = new Map();  // CHashFun -> {idx, f}
     this.byRip = new Map();  // rip of descriptor -> {idx, f}
     this.tableFuncs = [];    // wasm func idx in table order
@@ -1069,6 +1076,27 @@ export class AOTBackend {
       ex.val = BigInt(BUILTIN_BASE + 8 * b.i);
       cc.htc.glbl_hash_table.add(ex);
     }
+  }
+  builtinIndex(name) { const b = this.builtins.find((x) => x.name === name); return b ? b.i + 1 : 0; }
+  builtinAddr(name) {
+    const k = this.builtinIndex(name);
+    if (!k) throw new Error('no builtin ' + name);
+    return BUILTIN_BASE + 8 * (k - 1);
+  }
+  get CATCH_END() { return CATCH_END; }
+  // Call a builtin through its descriptor (works in every module once the
+  // kernel's __init ran), else the fallback import.  The result is dropped.
+  hook(by, name, fallback) {
+    if (!this.builtinIndex(name)) {
+      if (fallback === null || fallback === undefined) throw new Error('no hook ' + name);
+      by.u8(OP.call).u32(fallback);
+      return;
+    }
+    const a = this.builtinAddr(name), sp = this.g.sp;
+    by.u8(OP.global_get).u32(sp).u8(OP.i32_const).s32(8).u8(OP.i32_sub).u8(OP.global_set).u32(sp);
+    by.u8(OP.global_get).u32(sp).u8(OP.i64_const).s64(BigInt(a)).u8(OP.i64_store).u32(3).u32(0);
+    by.u8(OP.i32_const).s32(a).u8(OP.i32_load).u32(2).u32(0);
+    by.u8(OP.call_indirect).u32(this.fnType).u32(0).u8(OP.drop);
   }
   builtinAt(addr) {
     const a = Number(addr) - BUILTIN_BASE;
@@ -1156,14 +1184,18 @@ export class AOTBackend {
       throw new Error(`Undefined function ${fun.str}`);
     // builtins get table slots too; __init() writes their descriptors and
     // turns every descriptor's module-relative slot into a table index.
-    const builtinK = [];
+    const builtinK = [], missing = [];
     for (const b of this.builtins) {
-      if (b.kind === 'alias' && !this.aliasSlots.has(b.target)) continue;
+      if (b.kind === 'alias' && !this.aliasSlots.has(b.target)) {
+        if (this.opts.requireAliases) missing.push(`${b.name} -> ${b.target}`);
+        continue;
+      }
       const s = this.builtinSlot(b);
       if (!s.f.body) throw new Error(`builtin alias ${b.name} -> ${b.target}: function not defined`);
       builtinK.push([b, this.tableFuncs.length]);
       this.tableFuncs.push(s.idx);
     }
+    if (missing.length) throw new Error('builtin aliases without a HolyC function: ' + missing.join(', '));
     {
       const init = this.mb.reserveFunc([], [], '__init');
       const by = new Bytes(), g = this.g;

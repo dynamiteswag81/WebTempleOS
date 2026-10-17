@@ -1,4 +1,4 @@
-# WebTempleOS — handoff (2026-10-16)
+# WebTempleOS — handoff (2026-10-17)
 
 Goal: a faithful port of TempleOS to WebAssembly. No x86 emulation, no
 networking. TempleOS's own compiler front-end produces intermediate code (ICs),
@@ -6,14 +6,79 @@ and a shared IC→wasm backend replaces its x86 back-end. Read **DESIGN.md**
 first; it holds the architecture and the reasons behind it. This file says
 where things stand and what to do next.
 
-## State in one paragraph
-The bootstrap compiler (a JS port of TempleOS's front-end) and the wasm
-backend both work. **Kernel.PRJ (27.8k lines) and Compiler.PRJ both compile to
-valid wasm modules** (642 KB and 869 KB). Assembly is still *stubbed* (the
-"lenient asm" mode skips asm blocks), so neither module can boot yet. Small
-HolyC programs compile and run correctly in Node: `test/run.mjs` passes 109
-checks covering most of the language. **Next job: port the kernel's
-assembly (the `port/` overlay), then boot the kernel in Node.**
+## State (2026-10-17, uncommitted work in the tree)
+**The kernel asm port is done (old next step 1):**
+`MSYS_NO_PATHCONV=1 node test/cmpkernel.mjs -strict` compiles all of Kernel.PRJ
+with no asm skipped (715 KB valid wasm, every builtin alias resolved).
+`test/run.mjs` still passes. **None of the ported HolyC has run yet**: it
+only compiles. **Next job: boot in Node** (plan below).
+
+What this session added:
+- `compiler/asm.js`: a data-only port of PrsAsmBlk (labels, `::` exports,
+  `@@` locals, DU8..DU64 with strings and DUP, ALIGN, USE16/32/64, IMPORT).
+  An opcode is an error. The lenient mode still uses the old skipper.
+- `runtime/builtins.js`: the builtin registry (order = ABI, append only).
+  Kinds: `alias` (HolyC fn in port/), `wasm` (hand-built: _MEMCPY, _MEMSET,
+  _RET, _SET_FS_BASE, _SET_GS_BASE, _CALL_ARGV, _RESUME, _FLOOR/_CEIL/
+  _TRUNC/_ROUND), `js` (math, _CPUID, _CTX_SWITCH, _HLT_WAIT, _IRQ_PENDING,
+  _DBG_PUTC; `suspend:true` = must be a JSPI `WebAssembly.Suspending` import).
+  cmpkernel `-strict` passes it with `requireAliases`.
+- backend: `be.hook(name)` calls a builtin through its fixed descriptor
+  (works in every module): catch end -> `_CATCH_END`, #DE -> `_INT_DIVZERO`,
+  HLT -> `_HLT`, PAUSE -> `_PAUSE`, STI/POPFD/SetRFlags with IF -> `_STI`,
+  `INT n` -> `_INT` (= `_IntDeliver(n)`). One-line asm also gained
+  `MOV_RAX_CR2` (rax=0) and `INT imm`.
+- `port/Kernel/`: Kernel.PRJ (adds `#include "PortA"` after KExts: KMathA and
+  KUtils need KernelB.HH's intrinsics), PortA.HC, KStart16/32 (data only),
+  KStart64/KMathA/KUtils (comments), StrA, Sched, KHashA, KInts, KExcept,
+  Compress, KTask (CallStkGrow), PCIBIOS (no BIOS: FarCall32 = FALSE),
+  MultiProc (single core), Mem/PageTables, Mem/MAllocFree. Each keeps the
+  original file and swaps the asm for HolyC at the same spot.
+
+Design decisions to keep:
+- **Tasks**: each task runs on its own JSPI wasm stack. `_Yield`/`_RestoreTask`
+  /`_TaskContextRestore` (Sched.HC) are the asm's scheduler in HolyC, and
+  `CtxSwitch(task)` (js `_CTX_SWITCH`, suspend) switches stacks. The rule for a
+  task's `rip`: `_RET` = resume its suspended stack. Anything else
+  (Break, task_end_cb) is called on top of the resumed stack, then rip is
+  reset to `_RET`. A task with no stack yet is started fresh by JS: sp=task->rsp,
+  call rip with no marker pushed ([rsp] is the return addr, e.g. &Exit), then
+  call that addr when it returns. Idle is a task whose rip is `_IdleLoop`.
+- **IRQs** are taken only from wasm (`_IrqPoll` at STI/PAUSE/HLT), never from
+  JS, so a handler may switch stacks. `_IntDeliver` reads dev.idt (no LIDT),
+  clears IF, calls the gate, restores RFLAGS. IRQ_TIMER = `_IrqTimer`.
+- **try/catch**: `_TestExcept`/`_TakeExcept` call `_RESUME(rbp,label,rsp)`;
+  `_CatchEnd` (KExcept.HC) is the rest of throw()'s loop.
+- **Memory must be 4 GB** (65536 pages, shared; Node 24 is fine, RSS stays
+  small). HPET/LAPIC/VGA go through `dev.uncached_alias`. So the boot loader
+  must report a reserved E820 entry up to exactly 4 GB: then
+  mem_physical_space=4G, the alias lands at 4G, and alias+x wraps to x.
+- Known deviations: MemCpy is memory.copy (memmove, not forward-overlap);
+  no x87 control word; no code breakpoints; `_CFG_HEAP_DBG` unsupported;
+  CallStkGrow fixes up argpop of its varargs by moving its saved RBP/marker.
+- **Gotcha**: a lone `$` in a port file comment starts a DolDoc command and
+  silently eats the rest of the file. Write `$$`.
+
+## Boot plan (next session)
+1. `port/Kernel/KMain.HC`: copy the original and add `U0 KStartWasm()` after
+   KMain. It does what KStart32/64 did: `*INT_MP_CRASH_ADDR(U32 *)=&IntMPCrash;`
+   SysInitPageTables; SysInit16MegSysCodeBp; RLf_64BIT;
+   `SetGsBase(CPUStructInit(0,&fixed->boot_cpu,&fixed->adam))`; init
+   fixed->adam_hc as KStart64 did; `SetFsBase(TaskInit(adam,MEM_ADAM_STK))`.
+   Then give JS the CTask rip/rsp/rbp/rflags offsets (add a js builtin), call
+   `CtxSwitch(Fs)` once so the boot stack becomes Adam's, `SetRSP(Fs->rsp)`
+   and call KMain.
+2. `runtime/boot.js` + `runtime/sched.js`: create a Machine with 65536 pages
+   and the js builtins (Suspending where needed). Copy the BIN *without* the
+   wasm bytes to 0x7C00 (base 0x7C20; the wasm is too big for low memory).
+   Patch abs addrs and instantiate. Fill the KStart16 vars through the
+   exports: MEM_BOOT_BASE=base, SYS_BOOT_PATCH_TABLE_BASE=0x7C00+patch_off,
+   E801/E820, MEM_PHYSICAL_SPACE, SYS_RUN_LEVEL (16BIT|32BIT|PATCHED, no VGA
+   at first, so text mode at 0xB8000 is easy to dump), SYS_PCI_BUSES. Set
+   sp below 0x97000 and call KStartWasm through `WebAssembly.promising`.
+3. Minimal devices: PIT (0x40/0x43, IRQ0 at 1 kHz), PIC (0x20/0x21 mask,
+   ICW2 base, EOI), CMOS RTC, keyboard status 0. `_HLT_WAIT` awaits the next
+   tick and throws if IF is off.
 
 ## How to run things (Git Bash, from the repo root)
 Git Bash rewrites `/Kernel/...` arguments into Windows paths, so prefix

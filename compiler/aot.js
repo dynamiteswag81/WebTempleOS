@@ -11,6 +11,7 @@ import {
   LexExpression, PrsStreamBlk, LexStmt2Bin, ExeCmdLine, COCInit, BufPtr, FieldRef,
   ICAdd as ICAddExport,
 } from './parse.js';
+import { PrsAsmBlk } from './asm.js';
 import { HostVM, ICProgram, interpCall, HOST_BASE, icListing } from './interp.js';
 import { I64, U64, b2f, f2b } from './util.js';
 
@@ -241,8 +242,9 @@ export class Bootstrap {
       hostStr(cc, s) { return vm.str(s); },
       hostStrRead(cc, addr) { return vm.readStr(addr); },
       asmBlock(cc) {
-        if (!self.lenientAsm) LexExcept(cc, 'asm{} blocks must be replaced by port/ files: ');
-        lenientAsmBlk(cc);
+        if (self.lenientAsm) return lenientAsmBlk(cc);
+        Lex(cc);
+        PrsAsmBlk(cc);
       },
       // One-line asm in a HolyC function: PrsStmt() does
       // CmpJoin(cc,CMPF_ASM_BLK|CMPF_ONE_ASM_INS) and an IC_ASM with the
@@ -251,6 +253,11 @@ export class Bootstrap {
       asmIns(cc) {
         const bytes = [];
         while (cc.token === K.TK_IDENT && cc.hash_entry && cc.hash_entry.type & K.HTT_OPCODE) {
+          if (cc.cur_str === 'INT') { // INT imm8 (Panic's INT I_DBG)
+            Lex(cc);
+            bytes.push(0xCD, Number(LexExpression(cc) & 255n));
+            continue;
+          }
           const enc = ONE_ASM_INS[cc.cur_str];
           if (!enc && self.lenientAsm) { // skip the rest of the line
             const tokLine = () => cc.lex_include_stk.line_num - (cc.last_U16 === 10 ? 1 : 0);
@@ -350,6 +357,7 @@ export const ONE_ASM_INS = {
   NOP: [0x90], CLD: [0xFC], STD: [0xFD], WBINVD: [0x0F, 0x09], INVD: [0x0F, 0x08],
   LFENCE: [0x0F, 0xAE, 0xE8], MFENCE: [0x0F, 0xAE, 0xF0], SFENCE: [0x0F, 0xAE, 0xF8],
   FNINIT: [0xDB, 0xE3], FWAIT: [0x9B], INT3: [0xCC], CPUID: [0x0F, 0xA2], RDTSC: [0x0F, 0x31],
+  MOV_RAX_CR2: [0x0F, 0x20, 0xD0],
 };
 
 // Front-end testing aid: skip an asm{} block, defining its labels (val 0).
