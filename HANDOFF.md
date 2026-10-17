@@ -6,18 +6,55 @@ and a shared IC→wasm backend replaces its x86 back-end. Read **DESIGN.md**
 first; it holds the architecture and the reasons behind it. This file says
 where things stand and what to do next.
 
-## State (2026-10-17, ~02:00 EDT)
-Setup on a fresh machine: `sh tools/fetch-vendor.sh` (see CLAUDE.md).
+## State (2026-10-17, session 4, ~11:15 UTC)
+Setup on a fresh machine: `sh tools/fetch-vendor.sh`, Node 24+ (if the
+machine has an older node first on PATH, put Node 24's bin dir first).
 
-**Boot in Node: in progress.** KStartWasm runs, KMain gets through
-memory/heap/task init, Core0Init, IntInit1, enables IRQs and takes the first
-timer IRQ (inside `TimeCal`). **Current hang:** in that IRQ,
-`_IrqTimer -> _RestoreTask(adam)` loops forever with no calls: the loop only
-spins like that if Adam looks not ready (TASKf_AWAITING_MSG/SUSPENDED set,
-or `wake_jiffy > cnts.jiffies`) AND `Gs->seth_task != task`. Check those
-fields at the hang with `test/boot-trace.mjs -dump` (offsets:
-`node tools/offsets.mjs CTask CCPU`; CTask task_flags=24 wake_jiffy=16
-next_task=128, CCPU seth_task=56 idle_task=64, cpu_flags=16).
+**Boot in Node reaches the normal TempleOS desktop** (VGA 640x480x16):
+`node tools/build.js Kernel && node tools/build.js Compiler && node tools/mkdisk.js && node test/boot.mjs -secs=30`
+writes `build/screen.png`: WinMgr, two user terminals, Tip of the Day,
+"Take Tour(y or n)?".  The real Compiler (Compiler.BIN as wasm) JIT-compiles
+StartOS/Adam through runtime/jit.js.
+
+What session 4 added (see git log for details):
+- Boot fixes: `sys_ctrl_alt_flags` is an array (Sched.HC tested its addr);
+  `--*p` is `*(--p)` in HolyC (KHashA port); f2i opcode (trunc_sat_f64_s
+  is 0xFC 6); RFLAGS/IRQ depth per stack (no nested timer IRQs).
+- Devices: `runtime/ata.js` (ATA PIO disk on 0x1F0), `runtime/ps2.js`
+  (8042, keyboard set 1, wheel mouse, `pc.typeText()`), `runtime/vga.js`
+  (DAC/attr palette, planes at 0xA0000+p*0x10000, `render()`).
+- `tools/mkdisk.js`: RedSea C: image (MBR + RedSea partition at 63) from
+  vendor/TempleOS + port/ + build/{Kernel,Compiler}.{BIN,MAP}.
+  `tools/rsls.js img [/dir]` lists a directory of an image.
+- `tools/binfix.js`: the upstream git tree was extracted with
+  `TOSZ -ascii`, which deleted every 0x05 byte and turned 0x1F into 0x20
+  in whole files, so DolDoc sprite bins don't parse ("Bin Not Found",
+  3 s RawPrint each).  binfix re-parses bins with the sprite grammar and
+  re-inserts the 0x05s; 35 of 39 damaged docs are repaired, 4 fail
+  (RawHide.HC, Titanium.HC and 2 more: run it to see).  .DATA files
+  (AutoComplete dictionaries) may be damaged the same way.
+- Compiler: `port/Compiler/` (Compiler.PRJ without the x86 back-end,
+  Templates labels only, CMisc `_LAST_FUN` = copy of a descriptor,
+  PrsLib `COCCompile` = OptPass012 then `JITCompile`/`JITStore`).
+  `runtime/jit.js` reads CIntermediateCode lists from linear memory
+  (offsets from build/layout.json, written by the Kernel build) into the
+  backend's IC shape; one wasm module per compile unit.
+- `port/Kernel/KLoad.HC`: `WasmLoad()` instantiates a BIN's wasm.
+- Adam ports: `port/Adam/Gr/{GrAsm,GrTextBase,GrScrn}.HC` (asm in HolyC,
+  VGA planes), `port/Adam/Opt/Boot/BootRAM.HC` (hard reboot).
+- JSPI breathing: `_IRQ_PENDING` and port `in` may suspend about every
+  10 ms so polling loops let the JS event loop run.
+
+Tests:
+- `node test/run.mjs` (AOT backend tests), `node test/jit.mjs` (the same
+  test/hc files compiled at run time by the real Compiler, ~2 s),
+  `node test/jit.mjs -adam` (test/hca/*.HC after MakeAdam).
+- `node test/boot.mjs -secs=N [-type="text\n" -typeat=S] [-text]` boots,
+  types, and saves build/screen.png.  With a `-trace` kernel build:
+  `-trace -until=Fn -ring=N -skip=A,B -args=Fn` (JIT'd functions are
+  traced too, as `jit:Name`).
+
+Next steps: see "Next steps" at the end of this file.
 
 Debugging tools (session 3):
 - `node tools/build.js Kernel -trace` compiles a call to the `trace`
@@ -201,42 +238,13 @@ it, with `port/` overlaid on top (`TempleFS` in aot.js).
 - The bootstrap must strip lexer strings' trailing NUL (`cstr()` in aot.js).
 
 ## Next steps, in order
-1. **Kernel asm port (`port/Kernel/...`).** Run `cmpkernel.mjs -strict` and
-   work through each asm block. Files with asm: KStart16/32/64, KUtils,
-   StrA, KMathA, KHashA, Mem/MAllocFree, Mem/PageTables, Compress,
-   KTask (2 blocks), Sched (`_YIELD`, task switching), KInts,
-   KExcept, MultiProc, PCIBIOS, SerialDev/Keyboard, KMain (end label),
-   plus inline `MOV ...` lines such as KInts.HC:156. The labels the C side
-   `_extern`s:
-   - *Data labels*: must be real labels in the image, defined by a small asm
-     subset that still needs writing (labels, `DU8/16/32/64`, `ALIGN`, `DUP`).
-     Examples: `SYS_*`, `MEM_*`, `SYS_PROGRESS*`, `SYS_SEMAS`, `SYS_GDT`,
-     `SYS_CPU_STRUCTS`.
-   - *Code labels*: become builtins (wasm or alias). Examples: `_MEMCPY`,
-     `_MEMSET*`, `_STRCMP`/`_STRCPY`/`_STRI*`/`_STRN*`, `_MALLOC`/`_FREE`/
-     `_MSIZE*`/`_MHEAP_CTRL`, `_HASH_*`, `_CALL`/`_CALL_IND`/
-     `_CALLEXTSTR`/`_CALLEXTNUM`/`_LAST_FUN`, math (`_POW`, `_EXP`, `_LN`,
-     `_LOG2`, `_LOG10`, `_FLOOR`, `_CEIL`, `_ROUND`, `_TRUNC`, `_ARG`,
-     `_SIGN`, `_CLAMP_*`, `_D3_*`), `_XCHG_*`/`_LXCHG_*`, `_BEQU`/`_LBEQU`/
-     `_BIT_FIELD_*`, `_REP_IN/OUT_*`, `_YIELD`, `_TASK_CONTEXT_RESTORE`,
-     `_TASK_END_NOW`, `_TEST_EXCEPT`/`_TAKE_EXCEPT`/`_SAVE_EXCEPT_REGS`
-     (see DESIGN.md try/catch), `_SYS_HLT`, `_CPUID`, `_SET_MSR`.
-   - The Compiler also needs `_LAST_FUN` (CMisc.HC), and its `Templates.HC`
-     asm is only used by the x86 back-end it no longer needs.
-2. **Boot in Node:** a JS boot loader in place of KStart16/32 (E820 map, load
-   Kernel.BIN.C at 0x7C00 so module base = 0x7C20, IET_ABS_ADDR relocations,
-   instantiate, then call the port's KStart64 replacement →
-   CPUStructInit/TaskInit/KMain). Set up a debug-port text output first.
-3. **Device emulation** (JS port-I/O bus): PIT, PIC, PS/2, CMOS RTC, VGA DAC
-   and a planar 640x480x16 framebuffer, ATA PIO disk with a RedSea C: image
-   builder, speaker.
-4. **Tasks with JSPI**, IRQ delivery at Yield/HLT/PAUSE.
-5. **Load the Compiler.** Load() gets one added call that instantiates the
-   BIN's wasm (trailer: `[u32 off][u32 len]['WASM'][u32 ntable]`). The
-   COCCompile hook calls the JS backend on ICs read from linear memory (needs
-   an adapter from the CIntermediateCode struct layout to the JS IC shape).
-   The runtime backend also needs `IC_CALL_INDIRECT2` and absolute-address
-   handling (AOTBackend's `immObject`/`indirect2Target` are the hooks).
-6. Browser UI (worker, canvas, IndexedDB disk), then performance work:
-   dominator-based structuring in place of the dispatch loop, and promoting
-   non-address-taken locals to wasm locals.
+1. Keyboard/mouse at the desktop: type at the prompt (`-type=`), answer
+   the Tour question, run HolyC at the command line, check the output.
+2. Browser UI: `server.cjs` (static files + COOP/COEP for
+   SharedArrayBuffer), `web/index.html` + a worker running `PC`
+   (canvas 640x480 from `vga.render`, key/mouse events -> `pc.key`/
+   `pc.mouse`), disk image fetched from build/C.img and kept in
+   IndexedDB (dirty sectors written back via the ATA `onWrite` hook).
+3. Performance: boot takes ~20 s of JIT; dominator-based structuring,
+   wasm locals for non-address-taken locals, batching JIT units.
+4. The 4 docs binfix can't repair; .DATA files.
