@@ -18,11 +18,14 @@
 import * as K from './consts.js';
 import { OP, OPFC, OPFE, T, Bytes, ModuleBuilder } from './wasm.js';
 import { intermediate_code_table } from './opt.js';
-import { OptClassFwd, CHashFun, cadd, csub } from './core.js';
+import { OptClassFwd, CHashFun, CHashExport, cadd, csub } from './core.js';
 import { I64, U64, b2f } from './util.js';
 import { FieldRef } from './parse.js';
 
 export const LABEL_LIMIT = 0x10000; // shadow stack values below this are local continuation ids
+// Builtins (what the kernel's asm routines become) have their descriptors at
+// fixed addresses so their symbols are HTF_IMM exports like any other code.
+export const BUILTIN_BASE = 0x1000, BUILTIN_MAX = 0x200;
 export const CATCH_END = 0xFFFF;    // pushed by TestExcept; the catch block's IC_RET calls _CatchEnd
 const F = 'f', I = 'i';
 
@@ -1040,6 +1043,11 @@ export class AOTBackend {
   constructor(opts = {}) { this.opts = opts; this.log = opts.log || (() => {}); }
   beginModule(cc, aotc) {
     const mb = this.mb = new ModuleBuilder();
+    // JS-implemented builtins are imports, so declare them first
+    this.builtins = (this.opts.builtins || []).map((b, i) => ({ ...b, i }));
+    this.jsImports = new Map();
+    for (const b of this.builtins) if (b.kind === 'js')
+      this.jsImports.set(b.name, mb.importFunc('js', b.name, new Array(b.nargs).fill(T.i64), [T.i64]));
     this.g = moduleImports(mb, this.opts);
     this.fnType = mb.type([], [T.i64]);
     this.h = addHelpers(mb, this.g);
@@ -1048,11 +1056,58 @@ export class AOTBackend {
     this.tableFuncs = [];    // wasm func idx in table order
     this.aotc = aotc;
     this.pendingBlobs = 0;
+    this.aliasSlots = new Map(); // HolyC function name -> slot (builtin aliases)
+    for (const b of this.builtins) {
+      if (b.kind === 'js') b.slot = this.jsWrapper(b);
+      else if (b.kind === 'wasm') b.slot = this.wasmBuiltin(b);
+    }
+  }
+  // Called once the module's glbl hash table exists: the builtin symbols.
+  predefine(cc) {
+    for (const b of this.builtins) {
+      const ex = new CHashExport(b.name, K.HTT_EXPORT_SYS_SYM | K.HTF_IMM | K.HTF_EXPORT);
+      ex.val = BigInt(BUILTIN_BASE + 8 * b.i);
+      cc.htc.glbl_hash_table.add(ex);
+    }
+  }
+  builtinAt(addr) {
+    const a = Number(addr) - BUILTIN_BASE;
+    if (a < 0 || a >= 8 * BUILTIN_MAX || a & 7) return null;
+    return this.builtins[a >> 3] || null;
+  }
+  builtinSlot(b) {
+    if (b.slot) return b.slot;
+    // alias of a HolyC function compiled in this module
+    let s = this.aliasSlots.get(b.target);
+    if (!s) { s = this.mb.reserveFunc([], [T.i64], b.target); this.aliasSlots.set(b.target, s); }
+    return s;
+  }
+  // wrapper with the standard ABI around a JS import: args at sp+8.., marker at sp
+  jsWrapper(b) {
+    const r = this.mb.reserveFunc([], [T.i64], b.name);
+    const by = new Bytes();
+    const sp = this.g.sp;
+    for (let i = 0; i < b.nargs; i++) by.u8(OP.global_get).u32(sp).u8(OP.i64_load).u32(3).u32(8 + 8 * i);
+    by.u8(OP.call).u32(this.jsImports.get(b.name));
+    by.u8(OP.global_get).u32(sp).u8(OP.i32_const).s32(8 + (b.ret1 ? 8 * b.nargs : 0)).u8(OP.i32_add).u8(OP.global_set).u32(sp);
+    r.f.body = by.toU8(); r.f.locals = [];
+    return r;
+  }
+  wasmBuiltin(b) {
+    const r = this.mb.reserveFunc([], [T.i64], b.name);
+    const by = new Bytes();
+    b.gen(by, this.g, this.h, this);
+    r.f.body = by.toU8(); r.f.locals = b.locals || [];
+    return r;
   }
   // a function slot for a CHashFun (reserved on first reference)
   slotFor(fun) {
     let s = this.byFun.get(fun);
-    if (!s) { s = this.mb.reserveFunc([], [T.i64], fun.str); this.byFun.set(fun, s); }
+    if (!s) {
+      s = (fun.str && this.aliasSlots.get(fun.str)) || this.mb.reserveFunc([], [T.i64], fun.str);
+      this.byFun.set(fun, s);
+      if (fun.str && this.builtins.some((b) => b.kind === 'alias' && b.target === fun.str)) this.aliasSlots.set(fun.str, s);
+    }
     return s;
   }
   compile(cc, prog) {
@@ -1099,8 +1154,37 @@ export class AOTBackend {
     for (const f of this.mb.funcs) if (!f.body) { f.body = Uint8Array.of(OP.unreachable); f.locals = []; }
     for (const [fun, s] of this.byFun) if (fun.flags & (1 << K.Cf_EXTERN) && !this.boundRip(s))
       throw new Error(`Undefined function ${fun.str}`);
+    // builtins get table slots too; __init() writes their descriptors and
+    // turns every descriptor's module-relative slot into a table index.
+    const builtinK = [];
+    for (const b of this.builtins) {
+      if (b.kind === 'alias' && !this.aliasSlots.has(b.target)) continue;
+      const s = this.builtinSlot(b);
+      if (!s.f.body) throw new Error(`builtin alias ${b.name} -> ${b.target}: function not defined`);
+      builtinK.push([b, this.tableFuncs.length]);
+      this.tableFuncs.push(s.idx);
+    }
+    {
+      const init = this.mb.reserveFunc([], [], '__init');
+      const by = new Bytes(), g = this.g;
+      for (const rip of this.byRip.keys()) {
+        // [base+rip] += table_base
+        by.u8(OP.global_get).u32(g.base).u8(OP.i32_wrap_i64);
+        by.u8(OP.global_get).u32(g.base).u8(OP.i32_wrap_i64).u8(OP.i32_load).u32(2).u32(rip);
+        by.u8(OP.global_get).u32(g.table_base).u8(OP.i32_add);
+        by.u8(OP.i32_store).u32(2).u32(rip);
+      }
+      for (const [b, k] of builtinK) {
+        const a = BUILTIN_BASE + 8 * b.i;
+        by.u8(OP.i32_const).s32(a).u8(OP.global_get).u32(g.table_base).u8(OP.i32_const).s32(k).u8(OP.i32_add).u8(OP.i32_store).u32(2).u32(0);
+        by.u8(OP.i32_const).s32(a).u8(OP.i32_const).s32(0x544C4257).u8(OP.i32_store).u32(2).u32(4); // 'WBLT'
+      }
+      init.f.body = by.toU8(); init.f.locals = [];
+      this.mb.export('__init', 0, init.idx);
+    }
     this.mb.elems.push({ offset: new Bytes().u8(OP.global_get).u32(this.g.table_base), funcs: this.tableFuncs });
     this.mb.export('ntable', 3, this.mb.addGlobal(T.i32, false, new Bytes().u8(OP.i32_const).s32(this.tableFuncs.length)));
+    this.ntable = this.tableFuncs.length;
     return this.mb.encode();
   }
   boundRip(s) { for (const v of this.byRip.values()) if (v === s) return true; return false; }
@@ -1131,6 +1215,8 @@ export class AOTBackend {
     if (t.code === K.IC_CALL_EXTERN) s = this.slotFor(t.data);
     else {
       const rip = Number(I64(t.data));
+      const bi = this.builtinAt(rip);
+      if (bi) { u.call(this.builtinSlot(bi).idx); return; }
       s = this.byRip.get(rip);
       if (!s) {
         // an _extern'ed asm label: rip of something that is not a compiled unit

@@ -421,6 +421,7 @@ export function CmpJoin(boot, cc, cmp_flags) {
     cc.htc.glbl_hash_table.next = cc.aot_depth <= 1 ? boot.cmp.asm_hash : htc.glbl_hash_table;
   } else cc.htc.glbl_hash_table.next = boot.hostTable;
   cc.htc.hash_table_lst = cc.htc.local_hash_table = new HashTable('local', cc.htc.glbl_hash_table);
+  if (boot.backend && cc.aot_depth === 1) boot.backend.predefine(cc);
   cc.htc.local_var_lst = cc.htc.fun;
   cc.htc.fun = null;
   if (cmp_flags & K.CMPF_LEX_FIRST) Lex(cc);
@@ -438,7 +439,7 @@ export function CmpJoin(boot, cc, cmp_flags) {
   res.heap_glbls = aotc.heap_glbls;
   res.max_align_bits = aotc.max_align_bits;
   res.org = aotc.org;
-  if (boot.backend) res.wasm = boot.backend.endModule(cc, aotc, res);
+  if (boot.backend) { res.wasm = boot.backend.endModule(cc, aotc, res); res.ntable = boot.backend.ntable; }
   cc.aot = res.parent_aot;
   Object.assign(cc.htc, htc);
   cc.aotc = old_aotc;
@@ -523,6 +524,7 @@ export function writeBin(aot) {
     dv.setUint32(total - 16, wasmOff, true);
     dv.setUint32(total - 12, wasm.length, true);
     dv.setUint32(total - 8, 0x4D534157, true); // 'WASM'
+    dv.setUint32(total - 4, aot.ntable || 0, true); // table entries the module needs
   }
   return out;
 }
