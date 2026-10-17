@@ -43,6 +43,11 @@ const run = async (label, text) => {
     await typeKeys(page, text.replace(/\\n/g, '\n'));
     await page.waitForTimeout((secs - +arg('typeat', secs / 2)) * 1000);
   } else await page.waitForTimeout(secs * 1000);
+  if (arg('mouse', null) && !label) { // -mouse=x,y: move there (page px) and click
+    const [x, y] = arg('mouse').split(',').map(Number);
+    await page.mouse.move(x, y, { steps: 20 }); await page.waitForTimeout(300);
+    await page.mouse.down(); await page.waitForTimeout(150); await page.mouse.up(); await page.waitForTimeout(2000);
+  }
   console.log(`${label} status:`, await page.textContent('#status'));
   await page.screenshot({ path: path.join(root, 'build', `browser${label}.png`) });
 };

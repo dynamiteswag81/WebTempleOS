@@ -51,10 +51,12 @@ document.addEventListener('pointerlockchange', () => {
   status.dataset.lock = locked() ? '1' : '';
   if (!locked() && buttons) { buttons = 0; worker.postMessage({ type: 'mouse', dx: 0, dy: 0, buttons }); }
 });
-canvas.addEventListener('mousemove', (e) => { if (locked()) worker.postMessage({ type: 'mouse', dx: e.movementX, dy: e.movementY, buttons }); });
+// (Without pointer lock, motion over the screen still moves TempleOS's
+// cursor; it just won't line up with the host's.)
+canvas.addEventListener('mousemove', (e) => worker.postMessage({ type: 'mouse', dx: e.movementX, dy: e.movementY, buttons }));
 const bit = (b) => (b === 0 ? 1 : b === 2 ? 2 : b === 1 ? 4 : 0);
-canvas.addEventListener('mousedown', (e) => { if (!locked()) return; buttons |= bit(e.button); worker.postMessage({ type: 'mouse', dx: 0, dy: 0, buttons }); e.preventDefault(); });
-canvas.addEventListener('mouseup', (e) => { if (!locked()) return; buttons &= ~bit(e.button); worker.postMessage({ type: 'mouse', dx: 0, dy: 0, buttons }); });
+canvas.addEventListener('mousedown', (e) => { if (document.activeElement !== canvas) return; buttons |= bit(e.button); worker.postMessage({ type: 'mouse', dx: 0, dy: 0, buttons }); e.preventDefault(); });
+canvas.addEventListener('mouseup', (e) => { if (!(buttons & bit(e.button))) return; buttons &= ~bit(e.button); worker.postMessage({ type: 'mouse', dx: 0, dy: 0, buttons }); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('wheel', (e) => { if (!locked()) return; e.preventDefault(); worker.postMessage({ type: 'mouse', dx: 0, dy: 0, buttons, dz: Math.sign(e.deltaY) }); }, { passive: false });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); worker.postMessage({ type: 'mouse', dx: 0, dy: 0, buttons, dz: Math.sign(e.deltaY) }); }, { passive: false });
 canvas.focus();

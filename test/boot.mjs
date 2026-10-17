@@ -46,6 +46,12 @@ pc.onHalt = (e) => done(e);
 const t0 = performance.now();
 pc.boot(new Uint8Array(bin.buffer, bin.byteOffset, bin.byteLength));
 const timer = setTimeout(() => done(null), secs * 1000);
+// -mouse=dx,dy[,buttons]: mouse motion at -typeat (then a click if buttons)
+if (arg('mouse', null)) setTimeout(() => {
+  const [dx, dy, b = 0] = arg('mouse').split(',').map(Number);
+  pc.mouse(dx, dy, 0);
+  if (b) { setTimeout(() => pc.mouse(0, 0, b), 300); setTimeout(() => pc.mouse(0, 0, 0), 500); }
+}, +arg('typeat', secs / 2) * 1000);
 // -type=TEXT: typed at -typeat=S seconds (\n for Enter)
 if (arg('type', null)) setTimeout(() => pc.typeText(arg('type').replace(/\\n/g, '\n')), +arg('typeat', secs / 2) * 1000);
 const e = await finished;
