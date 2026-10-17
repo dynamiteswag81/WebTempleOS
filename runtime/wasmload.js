@@ -13,13 +13,14 @@ export function binInfo(bin) {
   if (sig !== 0x42534F54) throw new Error('not a TempleOS BIN');
   const patch = Number(dv.getBigInt64(16, true));
   const size = Number(dv.getBigInt64(24, true));
-  let wasm = null;
+  let wasm = null, wasmOff = 0, ntable = 0;
   if (size >= 16 && dv.getUint32(size - 8, true) === 0x4D534157) {
-    const off = dv.getUint32(size - 16, true), len = dv.getUint32(size - 12, true);
-    wasm = bin.subarray(off, off + len);
-    var ntable = dv.getUint32(size - 4, true);
+    wasmOff = dv.getUint32(size - 16, true);
+    wasm = bin.subarray(wasmOff, wasmOff + dv.getUint32(size - 12, true));
+    ntable = dv.getUint32(size - 4, true);
   }
-  return { patch, size, wasm, ntable, alignBits: bin[2] };
+  // imgEnd: header, image and patch table (what must be in memory)
+  return { patch, size, wasm, wasmOff, ntable, imgEnd: wasm ? wasmOff : size, alignBits: bin[2] };
 }
 
 // Parse a patch table (LoadPass1/2 format).
@@ -99,9 +100,10 @@ export class Machine {
   }
 
   // Load a BIN (as Load() does) at a fixed address; returns its exports.
+  // The wasm bytes are not copied: they are instantiated from 'bin'.
   loadBin(bin, at) {
     const info = binInfo(bin);
-    this.u8.set(bin.subarray(0, info.size), at);
+    this.u8.set(bin.subarray(0, info.imgEnd), at);
     const base = at + HDR;
     const ents = patchEntries(this.memory, at + info.patch);
     const dv = this.dv;

@@ -6,14 +6,44 @@ and a shared IC→wasm backend replaces its x86 back-end. Read **DESIGN.md**
 first; it holds the architecture and the reasons behind it. This file says
 where things stand and what to do next.
 
-## State (2026-10-17, uncommitted work in the tree)
-**The kernel asm port is done (old next step 1):**
+## State (2026-10-17, ~02:00 EDT)
+Setup on a fresh machine: `sh tools/fetch-vendor.sh` (see CLAUDE.md).
+
+**Boot in Node: started, not working yet.** Boot plan steps 1-2 below are
+written but the first run hangs: `node test/boot.mjs -secs=5` never prints
+(not even its 5 s timeout), so wasm is spinning in a synchronous loop
+somewhere after `KStartWasm` starts (no JSPI suspension, no event loop).
+Find where (e.g. a `trace` import call per function entry, or run with
+`--cpu-prof`, or bisect with `PortSet`/`DbgPutc` calls in KStartWasm/KMain).
+Suspects: a PAUSE/LBts spin lock whose flag starts set, `Busy()`
+(PortNop loop), SysTimerRead/PIT behaviour, or `_IrqPoll` re-entering.
+What was added for it (session 3):
+- `port/Kernel/KMain.HC`: original + `KStartWasm()` (KStart32/64's jobs:
+  page tables, sys_code_bp, CPU0 struct, Adam's heap ctrl, TaskInit, then
+  `CtxSwitch(Fs)` so the boot stack becomes Adam's, `SetRSP`, `KMain`).
+  It tells JS the CTask field offsets through the new js builtin
+  `_PORT_SET` (`PortSet(key,val)`, keys `PORT_*` in PortA.HC).
+- `runtime/pc.js`: `PC` = Machine + devices + boot loader (fills the
+  KStart16 vars: E801/E820 with a reserved entry up to 4 GB, boot base
+  0x7C20, patch table base, run level) + the builtins' JS services
+  (`cpuid`, `irqPending`, `hltWait`, `portSet`, `textScreen()`).
+- `runtime/sched.js`: JSPI task switching as designed below. A new task is
+  started by a small wasm trampoline (`task_start`) on a fresh promising()
+  stack; suspended stacks are keyed by CTask address + task_num.
+  `enter()` restores RFLAGS from `CTask.rflags` (IRET).
+- `runtime/devices.js`: IOBus, 8259 PIC pair, 8254 PIT (IRQ0 from real time,
+  coalesced), CMOS RTC (BCD), ports 0x61/0x80/0x92, PCI config (no devices).
+  Still to write: PS/2 keyboard/mouse, ATA disk + RedSea image builder, VGA.
+- `tools/build.js` (builds `build/Kernel.BIN` with 65536-page memory
+  imports; the AOT backend default is 16384) and `test/boot.mjs`.
+- `runtime/wasmload.js`: `loadBin` copies only header+image+patch table.
+
+**Earlier (session 2): the kernel asm port is done.**
 `MSYS_NO_PATHCONV=1 node test/cmpkernel.mjs -strict` compiles all of Kernel.PRJ
 with no asm skipped (715 KB valid wasm, every builtin alias resolved).
-`test/run.mjs` still passes. **None of the ported HolyC has run yet**: it
-only compiles. **Next job: boot in Node** (plan below).
+`test/run.mjs` still passes.
 
-What this session added:
+What session 2 added:
 - `compiler/asm.js`: a data-only port of PrsAsmBlk (labels, `::` exports,
   `@@` locals, DU8..DU64 with strings and DUP, ALIGN, USE16/32/64, IMPORT).
   An opcode is an error. The lenient mode still uses the old skipper.

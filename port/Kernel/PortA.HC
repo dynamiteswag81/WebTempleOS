@@ -1,4 +1,14 @@
 //WebTempleOS port of KMathA.HC: HolyC versions of the x87 routines.
+
+//Keys of PortSet(): what KStartWasm() tells the JS runtime.
+#define PORT_TASK_RIP		1
+#define PORT_TASK_RSP		2
+#define PORT_TASK_RBP		3
+#define PORT_TASK_RFLAGS	4
+#define PORT_TASK_NUM		5
+#define PORT_TASK_NAME		6
+#define PORT_BOOTED		7
+_extern _PORT_SET U0 PortSet(I64 key,I64 val); //Port: tell the JS runtime.
 //_FLOOR,_CEIL,_TRUNC,_ROUND are wasm builtins and _POW,_POW10,_EXP,
 //_LN,_LOG2,_LOG10,_ARG are JS builtins (see runtime/builtins.js).
 

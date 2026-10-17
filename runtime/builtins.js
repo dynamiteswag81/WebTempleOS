@@ -171,6 +171,8 @@ export const BUILTINS = [
   { name: '_PAUSE', kind: 'alias', target: '_Pause' },            // PAUSE
   { name: '_STI', kind: 'alias', target: '_Sti' },                // STI/POPFD setting IF
   { name: '_INT', kind: 'alias', target: '_IntDeliver' },         // INT n (arg n)
+  // ---- port runtime services
+  { name: '_PORT_SET', kind: 'js', nargs: 2, ret1: true, js: (m) => (k, v) => { m.portSet(Number(k), v); return 0n; } },
 ];
 
 // SYS_POW in KMathA.HC.
