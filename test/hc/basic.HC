@@ -1,6 +1,7 @@
 //Backend unit tests: each top-level statement runs in order (IET_MAIN).
 //Expected output lines follow //> markers.
 #include "/Kernel/KernelA.HH"
+#include "/Compiler/CompilerA.HH"
 _extern __TPI U0 TPI(I64 i);
 _extern __TPF U0 TPF(F64 d);
 _extern __TPS U0 TPS(U8 *s);
