@@ -49,6 +49,11 @@ to enable sound (browsers block audio until you do).
 See [DESIGN.md](DESIGN.md) for the architecture and
 [HANDOFF.md](HANDOFF.md) for details and what could be improved.
 
+## License
+The port's own code is under the [MIT License](LICENSE). TempleOS itself,
+fetched by `tools/fetch-vendor.sh` and partly carried in `port/`, is public
+domain.
+
 ## Credits
 TempleOS is by Terry A. Davis, released into the public domain. This port
 is not affiliated with him.
