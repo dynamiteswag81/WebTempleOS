@@ -24,8 +24,20 @@ function key(e, up) {
   const sc = SCANCODES[e.code];
   if (sc === undefined) return;
   e.preventDefault();
+  syncMods(e);
   if (up) down.delete(e.code); else down.add(e.code);
   worker.postMessage({ type: 'key', code: sc, up });
+}
+// Shift/Ctrl/Alt as the event says they are (a modifier pressed outside
+// the page, or synthetic input, sends no key event of its own)
+const MODS = [['shiftKey', 'ShiftLeft', 'ShiftRight'], ['ctrlKey', 'ControlLeft', 'ControlRight'], ['altKey', 'AltLeft', 'AltRight']];
+function syncMods(e) {
+  for (const [flag, l, r] of MODS) {
+    if (e.code === l || e.code === r) continue;
+    const isDown = down.has(l) || down.has(r);
+    if (e[flag] && !isDown) { down.add(l); worker.postMessage({ type: 'key', code: SCANCODES[l], up: false }); }
+    else if (!e[flag] && isDown) for (const c of [l, r]) if (down.delete(c)) worker.postMessage({ type: 'key', code: SCANCODES[c], up: true });
+  }
 }
 window.addEventListener('keydown', (e) => key(e, false));
 window.addEventListener('keyup', (e) => key(e, true));
