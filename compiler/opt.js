@@ -516,7 +516,9 @@ export function OptPass012(cc) {
             else tmpi.data = uo.v ? sx(U64(tmpi1.data) >> sh) : sx(sx(tmpi1.data) >> sh);
             tmpi.code = K.IC_IMM_I64;
           } else {
-            tmpi.data = f2b(b2f(tmpi1.data) * Math.pow(2, code === K.IC_SHL_CONST ? Number(tmpi.data) : -Number(tmpi.data)));
+            // F64 shifts: TempleOS compiles these as integer shifts of the bits
+            const sh = U64(tmpi.data) & 63n;
+            tmpi.data = code === K.IC_SHL_CONST ? sx(tmpi1.data << sh) : sx(sx(tmpi1.data) >> sh);
             tmpi.code = K.IC_IMM_F64;
           }
         } else if (tmpi1.code === code) {
@@ -534,7 +536,8 @@ export function OptPass012(cc) {
             else tmpi.data = uo.v ? sx(U64(tmpi1.data) >> sh) : sx(sx(tmpi1.data) >> sh);
             tmpi.code = K.IC_IMM_I64;
           } else {
-            tmpi.data = f2b(b2f(tmpi1.data) * Math.pow(2, (code === K.IC_SHL ? 1 : -1) * b2f(tmpi2.data)));
+            const sh = U64(tmpi2.data) & 63n; // integer shift of the bits (see SHL_CONST)
+            tmpi.data = code === K.IC_SHL ? sx(tmpi1.data << sh) : sx(sx(tmpi1.data) >> sh);
             tmpi.code = K.IC_IMM_F64;
           }
         } else if (tmpi2.code === K.IC_IMM_I64) {
