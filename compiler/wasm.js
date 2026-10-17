@@ -68,7 +68,7 @@ export class Bytes {
     }
   }
   f64(x) { const d = new DataView(new ArrayBuffer(8)); d.setFloat64(0, x, true); for (let i = 0; i < 8; i++) this.a.push(d.getUint8(i)); return this; }
-  str(s) { const e = Buffer.from(s, 'utf8'); this.u32(e.length); this.bytes(e); return this; }
+  str(s) { const e = new TextEncoder().encode(s); this.u32(e.length); this.bytes(e); return this; }
   vec(items, fn) { this.u32(items.length); for (const it of items) fn(this, it); return this; }
   get length() { return this.a.length; }
   toU8() { return Uint8Array.from(this.a); }

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebTempleOS</title>
+<style>
+  :root { --bg: #000; --fg: #aaa; --accent: #55f; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 monospace; }
+  main { display: flex; flex-direction: column; align-items: center; padding: 12px 16px; gap: 8px; }
+  canvas { width: min(1280px, calc(100vw - 32px)); aspect-ratio: 4 / 3; image-rendering: pixelated; background: #000;
+    outline: 1px solid #222; cursor: none; }
+  canvas:focus { outline-color: var(--accent); }
+  #bar { width: min(1280px, calc(100vw - 32px)); display: flex; gap: 12px; align-items: center; }
+  #status { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { background: #111; color: var(--fg); border: 1px solid #333; font: inherit; padding: 2px 8px; cursor: pointer; }
+  #log { width: min(1280px, calc(100vw - 32px)); max-height: 8em; overflow: auto; color: #777; white-space: pre-wrap; display: none; }
+</style>
+</head>
+<body>
+<main>
+  <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
+  <div id="bar">
+    <span id="status">Loading...</span>
+    <button id="logbtn" title="Show runtime messages">Log</button>
+    <button id="reset" title="Forget the files saved in this browser and start from the original C: drive">Reset C:</button>
+  </div>
+  <div id="log"></div>
+</main>
+<script type="module" src="main.js"></script>
+</body>
+</html>
