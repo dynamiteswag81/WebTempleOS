@@ -7,6 +7,7 @@ import { BUILTIN_BASE } from '../compiler/backend.js';
 import { Sched, Halt } from './sched.js';
 import { IOBus, PICs, PIT, CMOS, Misc } from './devices.js';
 import { ATADisk } from './ata.js';
+import { PS2, charScan } from './ps2.js';
 
 export const MEM_PAGES = 65536; // 4 GB: the uncached alias wraps to 0 (HANDOFF.md)
 const GB = 0x100000000;
@@ -43,6 +44,8 @@ export class PC {
     this.pit = new PIT(io, this.pics, now);
     this.cmos = new CMOS(io);
     this.misc = new Misc(io, this.pit);
+    this.ps2 = new PS2(io, this.pics);
+    this.ps2.onIrq = () => this.wakeHlt();
     if (disk) this.ata = new ATADisk(io, disk, { onWrite: onDiskWrite });
     this.sched = new Sched(this);
   }
@@ -89,7 +92,21 @@ export class PC {
   // a device raised an IRQ: wake a HLT
   irq(n) {
     this.pics.raise(n);
-    for (const w of this.waiters.slice()) w.wake();
+    this.wakeHlt();
+  }
+  wakeHlt() { for (const w of this.waiters.slice()) w.wake(); }
+  // ---- input
+  key(code, up) { this.ps2.key(code, up); }
+  mouse(dx, dy, buttons, dz) { this.ps2.mouse(dx, dy, buttons, dz); }
+  // type ASCII text (US layout), for tests
+  typeText(s) {
+    for (const ch of s) {
+      const k = charScan(ch);
+      if (!k) continue;
+      if (k[1]) this.key(0x2A, false);
+      this.key(k[0], false); this.key(k[0], true);
+      if (k[1]) this.key(0x2A, true);
+    }
   }
   dbgPutc(ch) { this.dbgLine = (this.dbgLine || '') + String.fromCharCode(ch); if (ch === 10) { this.log('dbg: ' + this.dbgLine.trimEnd()); this.dbgLine = ''; } }
   fail(e) {
