@@ -34,7 +34,7 @@ export const OP = {
   i64_reinterpret_f64: 0xBD, f64_reinterpret_i64: 0xBF,
 };
 // 0xFC prefixed
-export const OPFC = { i64_trunc_sat_f64_s: 7, memory_copy: 10, memory_fill: 11 };
+export const OPFC = { i64_trunc_sat_f64_s: 6, memory_copy: 10, memory_fill: 11 };
 // 0xFE prefixed (threads)
 export const OPFE = {
   memory_atomic_notify: 0x00, memory_atomic_wait32: 0x01,

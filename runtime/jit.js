@@ -10,6 +10,7 @@ import * as K from '../compiler/consts.js';
 import { T, OP, Bytes, ModuleBuilder } from '../compiler/wasm.js';
 import { Unit, addHelpers, moduleImports, BRANCH_CODES, BackendError, BUILTIN_BASE, CATCH_END } from '../compiler/backend.js';
 import { BUILTINS } from './builtins.js';
+import { intermediate_code_table } from '../compiler/opt.js';
 
 const WASM_TAG = 0x4D534157, WBLT_TAG = 0x544C4257;
 const LABEL_DATA = new Set([...BRANCH_CODES, K.IC_LABEL, K.IC_GET_LABEL]);
@@ -125,6 +126,7 @@ export class JIT {
     try {
       const u = this.readUnit(cc);
       if (u.flags & K.CCF_AOT_COMPILE) throw new BackendError('AOT compile at run time is not supported');
+      if (this.dump && this.dump(u)) this.pc.log('--- jit unit ' + (u.fun ? u.fun.str : '(stmt)') + ':\n' + u.ics.map((t) => `${(intermediate_code_table[t.code] || {}).name || t.code} ${typeof t.data === 'bigint' ? t.data : t.data ? '[obj]' : ''} cls=${t.cls ? t.cls.raw_type + '/' + t.cls.ptr_stars_cnt : '-'} f=${t.flags.toString(16)}`).join('\n'));
       if (typePtr) this.dv.setBigInt64(typePtr, BigInt(this.exprType(u.ics)), true);
       const strOffs = new Map();
       let off = 8;

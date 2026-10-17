@@ -44,6 +44,8 @@ pc.onHalt = (e) => done(e);
 const t0 = performance.now();
 pc.boot(new Uint8Array(bin.buffer, bin.byteOffset, bin.byteLength));
 const timer = setTimeout(() => done(null), secs * 1000);
+// -type=TEXT: typed at -typeat=S seconds (\n for Enter)
+if (arg('type', null)) setTimeout(() => pc.typeText(arg('type').replace(/\\n/g, '\n')), +arg('typeat', secs / 2) * 1000);
 const e = await finished;
 clearTimeout(timer);
 console.log(`--- ${((performance.now() - t0) / 1000).toFixed(2)} s, ${pc.sched.switches} task switches`);
@@ -60,5 +62,6 @@ if (names) {
   console.log('--- most called:');
   for (const [id, n] of [...counts].sort((a, b) => b[1] - a[1]).slice(0, 15)) console.log(names[id] + ' ' + n);
 }
+if (arg('savedisk', null) && disk) fs.writeFileSync(arg('savedisk'), disk);
 if (e) { console.log('--- halted:', e.stack || e); process.exit(1); }
 process.exit(0);

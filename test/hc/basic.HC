@@ -60,3 +60,8 @@ Types;
 //> 3
 //> -4
 //> 1099511627776
+
+_intern IC_TO_I64 I64 ToI64(F64 d);
+F64 neg_f=-2.7;
+TPI(ToI64(neg_f)); //f2i of a negative (not constant-folded)
+//> -2
