@@ -423,7 +423,9 @@ function interpRun1(vm, prog, ctx) {
 export function icListing(ics) {
   const lines = [];
   const lbl = new Map();
-  const ln = (m) => { if (!m || typeof m !== 'object') return String(m); while (m.fwd) m = m.fwd; if (!lbl.has(m)) lbl.set(m, 'L' + lbl.size); return lbl.get(m); };
+  const id = (m) => { if (!lbl.has(m)) lbl.set(m, 'L' + lbl.size); return lbl.get(m); };
+  // a label prints as itself, then ->its fwd target if threaded
+  const ln = (m) => { if (!m || typeof m !== 'object') return String(m); let f = m; while (f.fwd) f = f.fwd; return f === m ? id(m) : id(m) + '->' + id(f); };
   for (const t of ics) {
     const e = intermediate_code_table[t.code];
     let d = t.data;

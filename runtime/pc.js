@@ -15,7 +15,7 @@ const BOOT_SRC_HARDDRV = 3;
 const builtinAddr = (name) => BUILTIN_BASE + 8 * BUILTINS.findIndex((b) => b.name === name);
 
 export class PC {
-  constructor({ ramMB = 1024, vga = false, log = console.log, now = () => performance.now() } = {}) {
+  constructor({ ramMB = 1024, vga = false, log = console.log, now = () => performance.now(), trace = null } = {}) {
     this.log = log;
     this.ramMB = ramMB;
     this.vga = vga;
@@ -29,6 +29,7 @@ export class PC {
       in: (port, size) => BigInt(this.io.in(port, size) >>> 0),
       out: (port, val, size) => this.io.out(port, Number(BigInt.asUintN(32, val)), size),
       rdtsc: () => BigInt(Math.floor(this.now() * 1e6)),
+      ...(trace ? { trace } : {}),
     } } });
     for (const b of BUILTINS) if (b.kind === 'js') {
       const f = b.js(this);
@@ -96,7 +97,8 @@ export class PC {
   }
 
   // ---- boot loader (KStart16/KStart32's jobs)
-  boot(kernelBin) {
+  boot(kernelBin) { this.load(kernelBin); this.start(); }
+  load(kernelBin) {
     const m = this.m, dv = this.dv;
     const info = binInfo(kernelBin);
     if (BOOT_RAM_BASE + info.imgEnd > BOOT_RAM_LIMIT - 0x8000) throw new Error('kernel image too big for low memory');
@@ -121,8 +123,12 @@ export class PC {
     }
     dv.setBigUint64(ex('MEM_PHYSICAL_SPACE'), BigInt(GB), true);
     dv.setUint16(ex('SYS_PCI_BUSES'), 0, true);
-    // call KStartWasm() on its own stack, from below the boot RAM limit
-    const kstart = ex('KStartWasm');
+    this.kstart = ex('KStartWasm');
+  }
+  // Call KStartWasm() on its own stack, from below the boot RAM limit.  It
+  // runs synchronously until the first suspension (HLT or a task switch).
+  start() {
+    const m = this.m, dv = this.dv, kstart = this.kstart;
     m.sp.value = BOOT_RAM_LIMIT - 64;
     m.sp.value -= 8; dv.setBigInt64(m.sp.value, 0n, true); // no return marker
     m.rflags.value = 0n;

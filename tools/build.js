@@ -12,12 +12,14 @@ import { MEM_PAGES } from '../runtime/pc.js';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'build');
 
-export function buildModule(prj, { builtins = BUILTINS, requireAliases = false, lenient = false } = {}) {
-  const backend = new AOTBackend({ builtins, requireAliases, lenient, memPages: MEM_PAGES, memMax: MEM_PAGES });
+export function buildModule(prj, { builtins = BUILTINS, requireAliases = false, lenient = false, trace = false } = {}) {
+  const backend = new AOTBackend({ builtins, requireAliases, lenient, trace, memPages: MEM_PAGES, memMax: MEM_PAGES });
   const boot = new Bootstrap({ roots: [path.join(root, 'port'), path.join(root, 'vendor', 'TempleOS')], backend });
   boot.lenientAsm = lenient;
   boot.hostInit();
-  return boot.Cmp(prj);
+  const r = boot.Cmp(prj);
+  r.traceNames = backend.traceNames;
+  return r;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -27,8 +29,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   for (const t of targets) {
     const t0 = Date.now();
     const prj = t === 'Kernel' ? '/Kernel/Kernel' : '/Compiler/Compiler';
-    const r = buildModule(prj, t === 'Kernel' ? { requireAliases: true } : { lenient: process.argv.includes('-lenient') });
+    const trace = process.argv.includes('-trace');
+    const r = buildModule(prj, t === 'Kernel' ? { requireAliases: true, trace } : { lenient: process.argv.includes('-lenient'), trace });
     fs.writeFileSync(path.join(out, t + '.BIN'), r.bin);
+    if (trace) fs.writeFileSync(path.join(out, t + '.trace.json'), JSON.stringify(r.traceNames));
     console.log(`${t}.BIN: ${r.bin.length} bytes (image ${r.aot.aot_U8s}, wasm ${r.aot.wasm.length}), ${Date.now() - t0} ms`);
   }
 }

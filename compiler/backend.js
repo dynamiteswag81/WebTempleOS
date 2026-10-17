@@ -228,10 +228,14 @@ class Unit {
       cur.end = i + 1;
       if (BRANCH_CODES.has(t.code) && i + 1 < ics.length) newBlock(i + 1);
     }
-    blocks.forEach((bl, k) => { for (const lb of bl.labels) labelBlock.set(fwd(lb), k); });
+    // A label maps to its own block.  Branches go to the label at the end
+    // of its fwd chain (OptPass012 threads "LABEL x; JMP y" as x.fwd=y, and
+    // x keeps its LABEL IC: mapping x by fwd(x) would make y's block x's).
+    blocks.forEach((bl, k) => { for (const lb of bl.labels) labelBlock.set(lb, k); });
     this.blocks = blocks; this.labelBlock = labelBlock;
     const blockOf = (lb) => {
-      const k = labelBlock.get(fwd(lb));
+      let k = labelBlock.get(fwd(lb));
+      if (k === undefined) k = labelBlock.get(lb);
       if (k === undefined) this.err('branch to undefined label');
       return k;
     };
@@ -248,6 +252,7 @@ class Unit {
 
     // ---- prologue
     this.gget(g.rbp).lset(this.L.fp);
+    if (be.opts.trace) this.i32(be.traceId(this.fun)).gget(g.sp).op(OP.i64_extend_i32_u).call(g.trace); // debug: fn entry
     // structure
     if (hasGetLabel) {
       // loop $restart (try (do <dispatch>) (catch $resume ...))
@@ -940,7 +945,11 @@ class Unit {
     this.spillStack();
     const targets = jt.jmp_table.map((lb) => this.blockOf(lb));
     const dft = this.blockOf(jt.dft);
-    for (const k of targets.concat([dft])) if (k <= this.curBlock) this.err('backward switch target', t);
+    // Backward targets (a case label threaded to a loop head) go through
+    // trampoline blocks that set $state and branch to the dispatch loop.
+    const back = [...new Set(targets.concat([dft]).filter((k) => k <= this.curBlock))];
+    const extra0 = this.extra;
+    for (let i = 0; i < back.length; i++) { this.op(OP.block).u8(T.void); this.extra++; }
     if (t.code === K.IC_SWITCH) {
       this.lget(this.L.ti).lget(this.L.ti2).op(OP.i64_ge_u);
       this.op(OP.if).u8(T.void); this.extra++;
@@ -949,9 +958,14 @@ class Unit {
     }
     this.lget(this.L.ti).op(OP.i32_wrap_i64);
     this.op(OP.br_table).u32(targets.length);
-    const d = (k) => k - this.curBlock - 1 + this.extra;
+    const d = (k) => (k <= this.curBlock ? back.indexOf(k) : k - this.curBlock - 1 + this.extra);
     for (const k of targets) this.b.u32(d(k));
     this.b.u32(d(dft));
+    for (let i = 0; i < back.length; i++) {
+      this.op(OP.end); this.extra--;
+      this.jump(back[i]);
+    }
+    if (this.extra !== extra0) this.err('switch trampoline depth', t);
   }
 
   retIC(t) {
@@ -1047,7 +1061,8 @@ function compressLocals(types) {
 // ------------------------------------------------------------- AOT backend
 // Used by the bootstrap: one wasm module per CmpJoin (Kernel, Compiler).
 export class AOTBackend {
-  constructor(opts = {}) { this.opts = opts; this.log = opts.log || (() => {}); }
+  constructor(opts = {}) { this.opts = opts; this.log = opts.log || (() => {}); this.traceNames = []; }
+  traceId(fun) { this.traceNames.push(fun ? fun.str : '<stmt>'); return this.traceNames.length - 1; }
   beginModule(cc, aotc) {
     const mb = this.mb = new ModuleBuilder();
     // JS-implemented builtins are imports, so declare them first

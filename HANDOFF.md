@@ -9,15 +9,34 @@ where things stand and what to do next.
 ## State (2026-10-17, ~02:00 EDT)
 Setup on a fresh machine: `sh tools/fetch-vendor.sh` (see CLAUDE.md).
 
-**Boot in Node: started, not working yet.** Boot plan steps 1-2 below are
-written but the first run hangs: `node test/boot.mjs -secs=5` never prints
-(not even its 5 s timeout), so wasm is spinning in a synchronous loop
-somewhere after `KStartWasm` starts (no JSPI suspension, no event loop).
-Find where (e.g. a `trace` import call per function entry, or run with
-`--cpu-prof`, or bisect with `PortSet`/`DbgPutc` calls in KStartWasm/KMain).
-Suspects: a PAUSE/LBts spin lock whose flag starts set, `Busy()`
-(PortNop loop), SysTimerRead/PIT behaviour, or `_IrqPoll` re-entering.
-What was added for it (session 3):
+**Boot in Node: in progress.** KStartWasm runs, KMain gets through
+memory/heap/task init, Core0Init, IntInit1, enables IRQs and takes the first
+timer IRQ (inside `TimeCal`). **Current hang:** in that IRQ,
+`_IrqTimer -> _RestoreTask(adam)` loops forever with no calls: the loop only
+spins like that if Adam looks not ready (TASKf_AWAITING_MSG/SUSPENDED set,
+or `wake_jiffy > cnts.jiffies`) AND `Gs->seth_task != task`. Check those
+fields at the hang with `test/boot-trace.mjs -dump` (offsets:
+`node tools/offsets.mjs CTask CCPU`; CTask task_flags=24 wake_jiffy=16
+next_task=128, CCPU seth_task=56 idle_task=64, cpu_flags=16).
+
+Debugging tools (session 3):
+- `node tools/build.js Kernel -trace` compiles a call to the `trace`
+  import at every function entry (names in `build/Kernel.trace.json`).
+- `node test/boot-trace.mjs -secs=3 [-dump]` boots that build in a worker
+  thread and prints the last function entries even while wasm spins
+  synchronously; `-dump` prints heap/pool state from the shared memory
+  (edit it to dump what you need).
+- `HCC_DUMP=Fn` listings now print threaded labels as `Lx->Ly`.
+
+Backend bugs fixed (session 3, tests in `test/hc/heap.HC`):
+- Labels were mapped to blocks by `fwd(label)`. OptPass012 threads
+  `LABEL x; JMP y` as `x.fwd=y` but keeps x's LABEL IC, so x's block
+  replaced y's and `JMP y` jumped to itself (infinite loop in
+  MemPagTaskAlloc). Now a label maps to its own block; branches use fwd.
+- A switch case threaded backward (case label -> loop head) is now
+  supported with trampoline blocks (was an error).
+
+What was added for the boot (session 3):
 - `port/Kernel/KMain.HC`: original + `KStartWasm()` (KStart32/64's jobs:
   page tables, sys_code_bp, CPU0 struct, Adam's heap ctrl, TaskInit, then
   `CtxSwitch(Fs)` so the boot stack becomes Adam's, `SetRSP`, `KMain`).
