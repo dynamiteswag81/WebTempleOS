@@ -18,14 +18,24 @@ const ring = [], counts = new Map();
 // -until=Fn: freeze the ring at the first entry of Fn (see what led there)
 const until = arg('until', null);
 const skip = new Set((arg('skip', '') || '').split(',').filter(Boolean).map((n) => names ? names.indexOf(n) : -1));
+// -args=Fn,..: print the first 3 args (and the strings they point to) at each entry of Fn
+const argFns = new Set((arg('args', '') || '').split(',').filter(Boolean).map((n) => names ? names.indexOf(n) : -1));
+const cstrAt = (a) => { let s = ''; if (a <= 0 || a >= 2 ** 32) return null; for (let i = 0; i < 40; i++) { const c = pc.u8[a + i]; if (!c) break; if (c < 32 || c > 126) return s ? s + '?' : null; s += String.fromCharCode(c); } return s; };
 let untilId = names && until ? names.indexOf(until) : -1, frozen = false;
 let ncalls = 0, deadline = performance.now() + secs * 1000;
 const trace = names && ((id, sp) => {
   if (!frozen && !skip.has(id)) { ring.push([id, Number(sp)]); if (ring.length > +arg('ring', 80)) ring.shift(); if (id === untilId) frozen = true; }
+  if (argFns.has(id)) {
+    const a = [1, 2, 3, 4, 5].map((k) => Number(pc.dv.getBigInt64(Number(sp) + 8 * k, true)));
+    console.log(`${names[id]}(${a.map((x) => x.toString(16) + (cstrAt(x) !== null ? ' "' + cstrAt(x) + '"' : '')).join(', ')})`);
+  }
   counts.set(id, (counts.get(id) || 0) + 1);
   if (++ncalls % 1000000 === 0 && performance.now() > deadline) throw new Error('trace: deadline in a synchronous run');
 });
-const pc = new PC({ ramMB: +arg('ram', 1024), trace });
+const imgPath = path.join(root, 'build', 'C.img');
+const disk = fs.existsSync(imgPath) ? new Uint8Array(fs.readFileSync(imgPath)) : null;
+if (!disk) console.log('(no build/C.img: run node tools/mkdisk.js)');
+const pc = new PC({ ramMB: +arg('ram', 1024), trace, disk });
 let done;
 const finished = new Promise((r) => { done = r; });
 pc.onHalt = (e) => done(e);

@@ -6,6 +6,7 @@ import { BUILTINS } from './builtins.js';
 import { BUILTIN_BASE } from '../compiler/backend.js';
 import { Sched, Halt } from './sched.js';
 import { IOBus, PICs, PIT, CMOS, Misc } from './devices.js';
+import { ATADisk } from './ata.js';
 
 export const MEM_PAGES = 65536; // 4 GB: the uncached alias wraps to 0 (HANDOFF.md)
 const GB = 0x100000000;
@@ -15,7 +16,7 @@ const BOOT_SRC_HARDDRV = 3;
 const builtinAddr = (name) => BUILTIN_BASE + 8 * BUILTINS.findIndex((b) => b.name === name);
 
 export class PC {
-  constructor({ ramMB = 1024, vga = false, log = console.log, now = () => performance.now(), trace = null } = {}) {
+  constructor({ ramMB = 1024, vga = false, log = console.log, now = () => performance.now(), trace = null, disk = null, onDiskWrite = null } = {}) {
     this.log = log;
     this.ramMB = ramMB;
     this.vga = vga;
@@ -42,6 +43,7 @@ export class PC {
     this.pit = new PIT(io, this.pics, now);
     this.cmos = new CMOS(io);
     this.misc = new Misc(io, this.pit);
+    if (disk) this.ata = new ATADisk(io, disk, { onWrite: onDiskWrite });
     this.sched = new Sched(this);
   }
   get dv() { return this.m.dv; }

@@ -21,7 +21,8 @@ CHash *PortHashSingleFind(I64 h,U8 *needle_str,I64 mask,CHashTable *table,
   if (!*_instance) return NULL;
   link=&table->body[h&table->mask];
   while (tmph=*link) {
-    if (tmph->type&mask && !StrCmp(tmph->str,needle_str) && !--*_instance) {
+    if (tmph->type&mask && !StrCmp(tmph->str,needle_str) &&
+	  !(*_instance-=1)) { //(HolyC parses --*p as *--p)
       tmph->use_cnt++;
       if (_link) *_link=link;
       return tmph;
